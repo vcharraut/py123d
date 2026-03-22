@@ -50,24 +50,21 @@ Available Modalities
      - The HD-Maps are in 3D, but may have artifacts due to polyline to polygon conversion (see below). For more information, see :class:`~py123d.api.MapAPI`.
    * - Bounding Boxes
      - ✓
-     - The bounding boxes are available with the :class:`~py123d.conversion.registry.WODMotionBoxDetectionLabel`. For more information, :class:`~py123d.datatypes.detections.BoxDetectionWrapper`.
+     - The bounding boxes are available with the :class:`~py123d.parser.registry.WODMotionBoxDetectionLabel`. For more information, :class:`~py123d.datatypes.detections.BoxDetectionsSE3`.
    * - Traffic Lights
      - ✓
-     - Traffic lights include the status and the lane id they are associated with, see :class:`~py123d.datatypes.detections.TrafficLightDetectionWrapper`.
-   * - Pinhole Cameras
+     - Traffic lights include the status and the lane id they are associated with, see :class:`~py123d.datatypes.detections.TrafficLightDetections`.
+   * - Cameras
      - X
      - n/a
-   * - Fisheye Cameras
-     - X
-     - n/a
-   * - LiDARs
+   * - Lidars
      - X
      - n/a
 
 .. dropdown:: Dataset Specific
 
 
-  .. autoclass:: py123d.conversion.registry.WODMotionBoxDetectionLabel
+  .. autoclass:: py123d.parser.registry.WODMotionBoxDetectionLabel
     :members:
     :no-inherited-members:
 
@@ -121,19 +118,8 @@ The Waymo Open Dataset requires additional dependencies that are included as opt
 
       pip install -e .[waymo]
 
-These dependencies are notoriously difficult to install due to compatibility issues.
-We recommend using a dedicated conda environment for this purpose. Using `uv <https://docs.astral.sh/uv/>`_ can significantly speed up the installation.
-Here is an example of how to set it up:
-
-.. code-block:: bash
-
-  conda create -n py123d_waymo python=3.10
-  conda activate py123d_waymo
-  uv pip install -e .[waymo]
-  # If something goes wrong: conda deactivate; conda remove -n py123d_waymo --all
-
-You only need the Waymo Open Dataset specific dependencies if you convert the dataset or read from the raw TFRecord files.
-After conversion, you may use any other ``py123d`` installation.
+The optional dependencies (``tensorflow-cpu`` and ``protobuf``) are only needed to convert the dataset or read from the raw TFRecord files.
+After conversion, you may use any other ``py123d`` installation without these dependencies.
 
 
 Dataset Specific Issues

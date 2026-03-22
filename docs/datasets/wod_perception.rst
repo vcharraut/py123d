@@ -48,43 +48,36 @@ Available Modalities
      - The HD-Maps are in 3D, but may have artifacts due to polyline to polygon conversion (see below). For more information, see :class:`~py123d.api.MapAPI`.
    * - Bounding Boxes
      - ✓
-     - The bounding boxes are available with the :class:`~py123d.conversion.registry.WODBoxDetectionLabel`. For more information, :class:`~py123d.datatypes.detections.BoxDetectionWrapper`.
+     - The bounding boxes are available with the :class:`~py123d.parser.registry.WODBoxDetectionLabel`. For more information, :class:`~py123d.datatypes.detections.BoxDetectionsSE3`.
    * - Traffic Lights
      - X
      - n/a
-   * - Pinhole Cameras
+   * - Cameras
      - ✓
      -
-      Includes 5 cameras, see :class:`~py123d.datatypes.sensors.PinholeCamera`:
+      Includes 5 cameras, see :class:`~py123d.datatypes.sensors.Camera`:
 
-      - :class:`~py123d.datatypes.sensors.PinholeCameraType.PCAM_F0` (front_camera)
-      - :class:`~py123d.datatypes.sensors.PinholeCameraType.PCAM_L0` (front_left_camera)
-      - :class:`~py123d.datatypes.sensors.PinholeCameraType.PCAM_R0` (front_right_camera)
-      - :class:`~py123d.datatypes.sensors.PinholeCameraType.PCAM_L1` (left_camera)
-      - :class:`~py123d.datatypes.sensors.PinholeCameraType.PCAM_R1` (right_camera)
+      - :class:`~py123d.datatypes.sensors.CameraID.PCAM_F0` (front_camera)
+      - :class:`~py123d.datatypes.sensors.CameraID.PCAM_L0` (front_left_camera)
+      - :class:`~py123d.datatypes.sensors.CameraID.PCAM_R0` (front_right_camera)
+      - :class:`~py123d.datatypes.sensors.CameraID.PCAM_L1` (left_camera)
+      - :class:`~py123d.datatypes.sensors.CameraID.PCAM_R1` (right_camera)
 
-   * - Fisheye Cameras
-     - X
-     - n/a
-   * - LiDARs
+   * - Lidars
      - ✓
      -
-      Includes 5 LiDARs, see :class:`~py123d.datatypes.sensors.LiDAR`:
+      Includes 5 Lidars, see :class:`~py123d.datatypes.sensors.Lidar`:
 
-      - :class:`~py123d.datatypes.sensors.LiDARType.LIDAR_TOP` (top)
-      - :class:`~py123d.datatypes.sensors.LiDARType.LIDAR_FRONT` (front)
-      - :class:`~py123d.datatypes.sensors.LiDARType.LIDAR_SIDE_LEFT` (side_left)
-      - :class:`~py123d.datatypes.sensors.LiDARType.LIDAR_SIDE_RIGHT` (side_right)
-      - :class:`~py123d.datatypes.sensors.LiDARType.LIDAR_BACK` (rear)
+      - :class:`~py123d.datatypes.sensors.LidarID.LIDAR_TOP` (top)
+      - :class:`~py123d.datatypes.sensors.LidarID.LIDAR_FRONT` (front)
+      - :class:`~py123d.datatypes.sensors.LidarID.LIDAR_SIDE_LEFT` (side_left)
+      - :class:`~py123d.datatypes.sensors.LidarID.LIDAR_SIDE_RIGHT` (side_right)
+      - :class:`~py123d.datatypes.sensors.LidarID.LIDAR_BACK` (rear)
 
 .. dropdown:: Dataset Specific
 
 
-  .. autoclass:: py123d.conversion.registry.WODPerceptionBoxDetectionLabel
-    :members:
-    :no-inherited-members:
-
-  .. autoclass:: py123d.conversion.registry.WODPerceptionLiDARIndex
+  .. autoclass:: py123d.parser.registry.WODPerceptionBoxDetectionLabel
     :members:
     :no-inherited-members:
 
@@ -141,19 +134,8 @@ The Waymo Open Dataset requires additional dependencies that are included as opt
 
       pip install -e .[waymo]
 
-These dependencies are notoriously difficult to install due to compatibility issues.
-We recommend using a dedicated conda environment for this purpose. Using `uv <https://docs.astral.sh/uv/>`_ can significantly speed up the installation.
-Here is an example of how to set it up:
-
-.. code-block:: bash
-
-  conda create -n py123d_waymo python=3.10
-  conda activate py123d_waymo
-  uv pip install -e .[waymo]
-  # If something goes wrong: conda deactivate; conda remove -n py123d_waymo --all
-
-You only need the Waymo Open Dataset specific dependencies if you convert the dataset or read from the raw TFRecord files.
-After conversion, you may use any other ``py123d`` installation.
+The optional dependencies (``tensorflow-cpu`` and ``protobuf``) are only needed to convert the dataset or read from the raw TFRecord files.
+After conversion, you may use any other ``py123d`` installation without these dependencies.
 
 Conversion
 ~~~~~~~~~~~~
@@ -165,7 +147,7 @@ You can convert the Waymo Open Dataset for Perception by running:
   py123d-conversion datasets=["wod-perception"]
 
 .. note::
-  The conversion of WOD-Perception by default stores the camera images as jpegs and the LiDAR point clouds as binary files in the logs.
+  The conversion of WOD-Perception by default stores the camera images as jpegs and the Lidar point clouds as binary files in the logs.
   Thus, the logs need fairly large disk space. Reading from the raw TFRecord files is also supported, but requires the Waymo Open Dataset specific dependencies (see above) and might be slower.
   To change the default behavior, you need to adapt the ``wod-perception.yaml`` converter configuration.
 

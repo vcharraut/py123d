@@ -1,70 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import numpy.typing as npt
 
-from py123d.common.utils.enums import SerialIntEnum
 from py123d.common.utils.mixin import ArrayMixin, indexed_array_repr
-from py123d.datatypes.time import TimePoint
-from py123d.geometry.pose import PoseSE3
-
-
-class FisheyeMEICameraType(SerialIntEnum):
-    """Enumeration of fisheye MEI camera types in multi-sensor setups."""
-
-    FCAM_L = 0
-    """Left-facing fisheye MEI camera."""
-
-    FCAM_R = 1
-    """Right-facing fisheye MEI camera."""
-
-
-class FisheyeMEICamera:
-    """Fisheye MEI camera data structure."""
-
-    __slots__ = ("_metadata", "_image", "_extrinsic", "_timestamp")
-
-    def __init__(
-        self,
-        metadata: FisheyeMEICameraMetadata,
-        image: npt.NDArray[np.uint8],
-        extrinsic: PoseSE3,
-        timestamp: Optional[TimePoint] = None,
-    ) -> None:
-        """Initialize a Fisheye MEI camera.
-
-        :param metadata: Metadata for the camera.
-        :param image: Image captured by the camera.
-        :param extrinsic: Extrinsic pose of the camera.
-        """
-        self._metadata = metadata
-        self._image = image
-        self._extrinsic = extrinsic
-        self._timestamp = timestamp
-
-    @property
-    def metadata(self) -> FisheyeMEICameraMetadata:
-        """The :class:`FisheyeMEICameraMetadata` object for the camera."""
-        return self._metadata
-
-    @property
-    def image(self) -> npt.NDArray[np.uint8]:
-        """Image captured by the camera, as a NumPy array."""
-        return self._image
-
-    @property
-    def extrinsic(self) -> PoseSE3:
-        """Extrinsic :class:`~py123d.geometry.PoseSE3` of the camera."""
-        return self._extrinsic
-
-    @property
-    def timestamp(self) -> Optional[TimePoint]:
-        """Timestamp of the camera image."""
-        return self._timestamp
+from py123d.datatypes.sensors.base_camera import BaseCameraMetadata, CameraID, CameraModel, register_camera_metadata
+from py123d.geometry import PoseSE3
+from py123d.geometry.geometry_index import Point3DIndex
 
 
 class FisheyeMEIDistortionIndex(IntEnum):
@@ -114,7 +59,7 @@ class FisheyeMEIDistortion(ArrayMixin):
         assert array.ndim == 1
         assert array.shape[-1] == len(FisheyeMEIDistortionIndex)
         instance = object.__new__(cls)
-        object.__setattr__(instance, "_array", array.copy() if copy else array)
+        instance._array = array.copy() if copy else array
         return instance
 
     @property
@@ -124,22 +69,22 @@ class FisheyeMEIDistortion(ArrayMixin):
 
     @property
     def k1(self) -> float:
-        """Radial distortion coefficient."""
+        """Radial distortion coefficient k1."""
         return self._array[FisheyeMEIDistortionIndex.K1]
 
     @property
     def k2(self) -> float:
-        """Radial distortion coefficient."""
+        """Radial distortion coefficient k2."""
         return self._array[FisheyeMEIDistortionIndex.K2]
 
     @property
     def p1(self) -> float:
-        """Tangential distortion coefficient."""
+        """Tangential distortion coefficient p1."""
         return self._array[FisheyeMEIDistortionIndex.P1]
 
     @property
     def p2(self) -> float:
-        """Tangential distortion coefficient."""
+        """Tangential distortion coefficient p2."""
         return self._array[FisheyeMEIDistortionIndex.P2]
 
     def __repr__(self) -> str:
@@ -196,7 +141,7 @@ class FisheyeMEIProjection(ArrayMixin):
         assert array.ndim == 1
         assert array.shape[-1] == len(FisheyeMEIProjectionIndex)
         instance = object.__new__(cls)
-        object.__setattr__(instance, "_array", array.copy() if copy else array)
+        setattr(instance, "_array", array.copy() if copy else array)
         return instance
 
     @property
@@ -229,51 +174,51 @@ class FisheyeMEIProjection(ArrayMixin):
         return indexed_array_repr(self, FisheyeMEIProjectionIndex)
 
 
-@dataclass
-class FisheyeMEICameraMetadata:
+@register_camera_metadata(CameraModel.FISHEYE_MEI)
+class FisheyeMEICameraMetadata(BaseCameraMetadata):
     """Metadata for a fisheye MEI camera."""
 
     __slots__ = (
         "_camera_name",
-        "_camera_type",
+        "_camera_id",
         "_mirror_parameter",
         "_distortion",
         "_projection",
         "_width",
         "_height",
-        "_static_extrinsic",
+        "_camera_to_imu_se3",
     )
 
     def __init__(
         self,
         camera_name: str,
-        camera_type: FisheyeMEICameraType,
+        camera_id: CameraID,
         mirror_parameter: Optional[float],
         distortion: Optional[FisheyeMEIDistortion],
         projection: Optional[FisheyeMEIProjection],
         width: int,
         height: int,
-        static_extrinsic: Optional[PoseSE3] = None,
+        camera_to_imu_se3: PoseSE3,
     ) -> None:
         """Initialize the fisheye MEI camera metadata.
 
         :param camera_name: Name of the fisheye MEI camera, according to the dataset naming convention.
-        :param camera_type: Type of the fisheye MEI camera.
+        :param camera_id: ID of the fisheye MEI camera.
         :param mirror_parameter: Mirror parameter of the camera model.
         :param distortion: Distortion parameters of the camera.
         :param projection: Projection parameters of the camera.
         :param width: Width of the camera image in pixels.
         :param height: Height of the camera image in pixels.
-        :param static_extrinsic: Static extrinsic pose of the camera.
+        :param camera_to_imu_se3: Static extrinsic pose of the fisheye MEI camera.
         """
         self._camera_name = camera_name
-        self._camera_type = camera_type
+        self._camera_id = camera_id
         self._mirror_parameter = mirror_parameter
         self._distortion = distortion
         self._projection = projection
         self._width = width
         self._height = height
-        self._static_extrinsic = static_extrinsic
+        self._camera_to_imu_se3 = camera_to_imu_se3
 
     @classmethod
     def from_dict(cls, data_dict: Dict[str, Any]) -> FisheyeMEICameraMetadata:
@@ -282,23 +227,27 @@ class FisheyeMEICameraMetadata:
         :param data_dict: Dictionary containing camera metadata.
         :return: A new instance of :class:`FisheyeMEICameraMetadata`.
         """
-        data_dict["camera_type"] = FisheyeMEICameraType(data_dict["camera_type"])
-        data_dict["distortion"] = (
-            FisheyeMEIDistortion.from_array(np.array(data_dict["distortion"]))
-            if data_dict["distortion"] is not None
-            else None
+        _distortion = (
+            FisheyeMEIDistortion.from_list(data_dict["distortion"]) if data_dict["distortion"] is not None else None
         )
-        data_dict["projection"] = (
-            FisheyeMEIProjection.from_array(np.array(data_dict["projection"]))
-            if data_dict["projection"] is not None
-            else None
+        _projection = (
+            FisheyeMEIProjection.from_list(data_dict["projection"]) if data_dict["projection"] is not None else None
         )
-        # TODO: Make static extrinsic mandatory in the future.
-        if "static_extrinsic" in data_dict.keys():
-            data_dict["static_extrinsic"] = (
-                PoseSE3.from_list(data_dict["static_extrinsic"]) if data_dict["static_extrinsic"] is not None else None
-            )
-        return FisheyeMEICameraMetadata(**data_dict)
+        return FisheyeMEICameraMetadata(
+            camera_name=data_dict["camera_name"],
+            camera_id=CameraID(data_dict["camera_id"]),
+            mirror_parameter=data_dict["mirror_parameter"],
+            distortion=_distortion,
+            projection=_projection,
+            width=data_dict["width"],
+            height=data_dict["height"],
+            camera_to_imu_se3=PoseSE3.from_list(data_dict["camera_to_imu_se3"]),
+        )
+
+    @property
+    def camera_model(self) -> CameraModel:
+        """The projection model of this camera."""
+        return CameraModel.FISHEYE_MEI
 
     @property
     def camera_name(self) -> str:
@@ -306,9 +255,9 @@ class FisheyeMEICameraMetadata:
         return self._camera_name
 
     @property
-    def camera_type(self) -> FisheyeMEICameraType:
-        """The type of the fisheye MEI camera."""
-        return self._camera_type
+    def camera_id(self) -> CameraID:
+        """The ID of the fisheye MEI camera."""
+        return self._camera_id
 
     @property
     def mirror_parameter(self) -> Optional[float]:
@@ -336,14 +285,9 @@ class FisheyeMEICameraMetadata:
         return self._height
 
     @property
-    def static_extrinsic(self) -> Optional[PoseSE3]:
-        """The static extrinsic pose of the fisheye MEI camera, if available."""
-        return self._static_extrinsic
-
-    @property
-    def aspect_ratio(self) -> float:
-        """The aspect ratio of the fisheye MEI camera."""
-        return self._width / self._height
+    def camera_to_imu_se3(self) -> PoseSE3:
+        """The static extrinsic pose of the fisheye MEI camera."""
+        return self._camera_to_imu_se3
 
     def to_dict(self) -> Dict[str, Any]:
         """Converts the :class:`FisheyeMEICameraMetadata` instance to a Python dictionary.
@@ -351,17 +295,44 @@ class FisheyeMEICameraMetadata:
         :return: A dictionary representation of the camera metadata.
         """
         data_dict: Dict[str, Any] = {}
+        data_dict["camera_model"] = self.camera_model.serialize()
         data_dict["camera_name"] = self._camera_name
-        data_dict["camera_type"] = int(self._camera_type)
+        data_dict["camera_id"] = int(self.camera_id)
         data_dict["mirror_parameter"] = self._mirror_parameter
         data_dict["distortion"] = self._distortion.array.tolist() if self._distortion is not None else None
         data_dict["projection"] = self._projection.array.tolist() if self._projection is not None else None
         data_dict["width"] = self._width
         data_dict["height"] = self._height
+        data_dict["camera_to_imu_se3"] = self._camera_to_imu_se3.to_list()
         return data_dict
 
-    def cam2image(self, points_3d: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    def project_to_image(
+        self,
+        points_cam: npt.NDArray[np.float64],
+    ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.bool_], npt.NDArray[np.float64]]:
+        """Project 3D points in camera frame to image pixel coordinates using the fisheye MEI model.
+
+        Delegates to :meth:`cam2image` and wraps the result in the unified interface.
+
+        :param points_cam: (N, 3) array of 3D points in the camera coordinate frame.
+        :return: A tuple of (pixel_coords (N,2), in_fov_mask (N,), depth (N,)).
+        :raises ValueError: If mirror_parameter is not set.
+        """
+        if self._mirror_parameter is None:
+            raise ValueError("Cannot project: mirror_parameter not set.")
+
+        x, y, signed_depth = self.cam2image(points_cam)
+        pixel_coords = np.column_stack([x, y])
+        in_fov_mask = self._compute_in_fov_mask(pixel_coords, signed_depth)
+        result = (pixel_coords, in_fov_mask, signed_depth)
+        return result
+
+    def cam2image(self, points_3d: npt.NDArray[np.float64]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """camera coordinate to image plane"""
+        assert points_3d.ndim == 2
+        assert points_3d.shape[1] == len(Point3DIndex)
+        assert self.mirror_parameter is not None
+
         norm = np.linalg.norm(points_3d, axis=1)
 
         x = points_3d[:, 0] / norm
@@ -393,4 +364,4 @@ class FisheyeMEICameraMetadata:
         x = gamma1 * x + u0
         y = gamma2 * y + v0
 
-        return x, y, norm * points_3d[:, 2] / np.abs(points_3d[:, 2])  # type: ignore
+        return x, y, norm * points_3d[:, 2] / np.abs(points_3d[:, 2])

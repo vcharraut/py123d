@@ -1,38 +1,48 @@
+import logging
 import random
 from functools import partial
 from pathlib import Path
 from typing import List, Optional, Union
 
-from py123d.api.scene.arrow.arrow_scene import ArrowSceneAPI
-from py123d.api.scene.arrow.utils.arrow_metadata_utils import get_log_metadata_from_arrow_schema
+import pyarrow as pa
+
+from py123d.api.scene.arrow.arrow_scene_api import ArrowSceneAPI
+from py123d.api.scene.arrow.utils.scene_builder_utils import (
+    check_log_passes_metadata_filters,
+    filter_scene_metadata_candidates,
+    generate_scene_metadatas,
+    infer_iteration_duration_s,
+    resolve_iteration_counts,
+    resolve_iteration_stride,
+    resolve_scene_uuid_indices,
+    scene_uuids_to_binary,
+)
 from py123d.api.scene.scene_api import SceneAPI
 from py123d.api.scene.scene_builder import SceneBuilder
 from py123d.api.scene.scene_filter import SceneFilter
-from py123d.api.scene.scene_metadata import SceneMetadata
+from py123d.api.utils.arrow_helper import get_lru_cached_arrow_table
+from py123d.api.utils.arrow_metadata_utils import get_metadata_from_arrow_schema
 from py123d.common.dataset_paths import get_dataset_paths
-from py123d.common.execution import Executor, executor_map_chunked_list
-from py123d.common.utils.arrow_column_names import (
-    FISHEYE_CAMERA_DATA_COLUMN,
-    LIDAR_DATA_COLUMN,
-    PINHOLE_CAMERA_DATA_COLUMN,
-    UUID_COLUMN,
-)
-from py123d.common.utils.arrow_helper import open_arrow_table
-from py123d.common.utils.uuid_utils import convert_to_str_uuid
+from py123d.common.execution import Executor
+from py123d.common.execution.utils import executor_map_chunked_list
+from py123d.datatypes.metadata import SceneMetadata
+from py123d.datatypes.metadata.log_metadata import LogMetadata
+
+logger = logging.getLogger(__name__)
 
 
 class ArrowSceneBuilder(SceneBuilder):
-    """Class for building scenes from Arrow log files."""
+    """Builds scenes from Arrow log directories using a category-based pipeline."""
 
     def __init__(
         self,
         logs_root: Optional[Union[str, Path]] = None,
         maps_root: Optional[Union[str, Path]] = None,
     ):
-        """Initializes the ArrowSceneBuilder.
+        """Initialize the ArrowSceneBuilder.
 
-        :param logs_root: The root directory fo log files, defaults to None
-        :param maps_root: The root directory for map files, defaults to None
+        :param logs_root: Root directory for log files, defaults to None (uses PY123D_DATA_ROOT).
+        :param maps_root: Root directory for map files, defaults to None (uses PY123D_DATA_ROOT).
         """
         if logs_root is None:
             logs_root = get_dataset_paths().py123d_logs_root
@@ -47,187 +57,192 @@ class ArrowSceneBuilder(SceneBuilder):
     def get_scenes(self, filter: SceneFilter, executor: Executor) -> List[SceneAPI]:
         """Inherited, see superclass."""
 
-        split_names = set(filter.split_names) if filter.split_names else _discover_split_names(self._logs_root, filter)
-        filter_log_names = set(filter.log_names) if filter.log_names else None
-        log_paths = _discover_log_paths(self._logs_root, split_names, filter_log_names)
-
+        # Category 1: Log discovery (filesystem-only)
+        log_paths = _parse_valid_log_dirs(self._logs_root, filter)
         if len(log_paths) == 0:
             return []
 
-        scenes = executor_map_chunked_list(executor, partial(_extract_scenes_from_logs, filter=filter), log_paths)
-        if filter.shuffle:
-            random.shuffle(scenes)
+        # Categories 2 & 3: Metadata filtering + scene generation (parallelized across logs)
+        # Pre-convert scene UUIDs to binary once (shared across all executor workers)
+        target_uuids_binary = scene_uuids_to_binary(filter.scene_uuids) if filter.scene_uuids is not None else None
+        scenes: List[SceneAPI] = executor_map_chunked_list(
+            executor,
+            partial(
+                _extract_scenes_from_log_dirs,
+                filter=filter,
+                maps_root=self._maps_root,
+                target_uuids_binary=target_uuids_binary,
+            ),
+            log_paths,
+            name="Scene extraction",
+        )
 
-        if filter.max_num_scenes is not None:
-            scenes = scenes[: filter.max_num_scenes]
+        # Category 4: Post-filtering
+        scenes = _apply_post_filters(scenes, filter)
         return scenes
 
 
+# --- Category 1: Log discovery ---
+
+
+def _parse_valid_log_dirs(logs_root: Path, filter: SceneFilter) -> List[Path]:
+    """Discover valid log directories based on Category 1 filter criteria (filesystem-only).
+
+    :param logs_root: Root directory containing split subdirectories.
+    :param filter: The scene filter.
+    :return: List of valid log directory paths.
+    """
+    split_names = filter.split_names if filter.split_names is not None else _discover_split_names(logs_root, filter)
+    log_paths: List[Path] = []
+    for split_name in split_names:
+        split_dir = logs_root / split_name
+        if split_dir.exists():
+            for log_path in split_dir.iterdir():
+                if log_path.is_dir() and (log_path / "sync.arrow").exists():
+                    if filter.log_names is None or log_path.name in filter.log_names:
+                        log_paths.append(log_path)
+    return log_paths
+
+
 def _discover_split_names(logs_root: Path, filter: SceneFilter) -> List[str]:
+    """Discover split names from the filesystem based on dataset and split_type filters."""
     split_types = set(filter.split_types) if filter.split_types else {"train", "val", "test"}
-    assert set(split_types).issubset({"train", "val", "test"}), (
-        f"Invalid split types: {split_types}. Valid split types are 'train', 'val', 'test'."
-    )
     split_names: List[str] = []
     for split in logs_root.iterdir():
         split_name = split.name
         dataset_name = split_name.split("_")[0]
-
         if filter.datasets is not None and dataset_name not in filter.datasets:
             continue
-
-        if split.is_dir():
-            if any(split_type in split_name for split_type in split_types):
-                split_names.append(split_name)
-
+        if split.is_dir() and any(split_type in split_name for split_type in split_types):
+            split_names.append(split_name)
     return split_names
 
 
-def _discover_log_paths(logs_root: Path, split_names: List[str], log_names: Optional[List[str]]) -> List[Path]:
-    """Discovers log file paths in the logs root directory based on the specified split names and log names."""
-    log_paths: List[Path] = []
-    for split_name in split_names:
-        for log_path in (logs_root / split_name).iterdir():
-            if log_path.is_file() and log_path.name.endswith(".arrow"):
-                if log_names is None or log_path.stem in log_names:
-                    log_paths.append(log_path)
-    return log_paths
+# --- Categories 2 & 3: Per-log scene extraction ---
 
 
-def _extract_scenes_from_logs(log_paths: List[Path], filter: SceneFilter) -> List[SceneAPI]:
-    """Extracts scenes from log files based on the given filter."""
+def _extract_scenes_from_log_dirs(
+    log_dirs: List[Path],
+    filter: SceneFilter,
+    maps_root: Optional[Path],
+    target_uuids_binary: Optional[pa.Array] = None,
+) -> List[SceneAPI]:
+    """Extract scenes from multiple log directories (chunked batch wrapper).
+
+    :param log_dirs: List of log directory paths to process.
+    :param filter: The scene filter.
+    :param maps_root: Root directory for map files.
+    :param target_uuids_binary: Pre-converted binary(16) Arrow array of target UUIDs, or None.
+    :return: Combined list of SceneAPI objects from all logs.
+    """
     scenes: List[SceneAPI] = []
-    for log_path in log_paths:
-        try:
-            scene_extraction_metadatas = _get_scene_extraction_metadatas(log_path, filter)
-        except Exception as e:
-            print(f"Error extracting scenes from {log_path}: {e}")
-            continue
-        for scene_extraction_metadata in scene_extraction_metadatas:
-            scenes.append(
-                ArrowSceneAPI(
-                    arrow_file_path=log_path,
-                    scene_metadata=scene_extraction_metadata,
-                )
-            )
+    for log_dir in log_dirs:
+        scenes.extend(_extract_scenes_from_log_dir(log_dir, filter, maps_root, target_uuids_binary))
     return scenes
 
 
-def _get_scene_extraction_metadatas(log_path: Union[str, Path], filter: SceneFilter) -> List[SceneMetadata]:
-    """Gets the scene metadatas from a log file based on the given filter.
+def _extract_scenes_from_log_dir(
+    log_dir: Path,
+    filter: SceneFilter,
+    maps_root: Optional[Path],
+    target_uuids_binary: Optional[pa.Array] = None,
+) -> List[SceneAPI]:
+    """Extract scenes from a single log directory (Categories 2 & 3).
 
-    TODO: This needs refactoring, clean-up, and tests. It's a mess.
+    :param log_dir: Path to the log directory.
+    :param filter: The scene filter.
+    :param maps_root: Root directory for map files.
+    :param target_uuids_binary: Pre-converted binary(16) Arrow array of target UUIDs, or None.
+    :return: List of SceneAPI objects for this log.
     """
+    try:
+        scene_metadatas = _get_scene_metadatas_from_log(log_dir, filter, target_uuids_binary)
+    except Exception as e:
+        logger.warning("Error extracting scenes from %s: %s", log_dir, e)
+        logger.debug("Full traceback for %s:", log_dir, exc_info=True)
+        return []
 
-    scene_metadatas: List[SceneMetadata] = []
-    recording_table = open_arrow_table(str(log_path))
-    log_metadata = get_log_metadata_from_arrow_schema(recording_table.schema)
-    num_log_iterations = len(recording_table)
+    scenes: List[SceneAPI] = []
+    for scene_metadata in scene_metadatas:
+        scenes.append(ArrowSceneAPI(log_dir=log_dir, scene_metadata=scene_metadata))
+    return scenes
 
-    start_idx = int(filter.history_s / log_metadata.timestep_seconds) if filter.history_s is not None else 0
-    end_idx = (
-        num_log_iterations - int(filter.duration_s / log_metadata.timestep_seconds)
-        if filter.duration_s is not None
-        else num_log_iterations
+
+def _get_scene_metadatas_from_log(
+    log_dir: Path,
+    filter: SceneFilter,
+    target_uuids_binary: Optional[pa.Array] = None,
+) -> List[SceneMetadata]:
+    """Get scene metadatas from a log directory using the three-phase pipeline.
+
+    Phase 1 (Category 2): Log-level metadata filtering
+    Phase 2 (Category 3a/b): UUID pre-filtering + candidate scene generation
+    Phase 3 (Category 3c): Scene-level filtering
+    """
+    sync_table = get_lru_cached_arrow_table(str(log_dir / "sync.arrow"))
+    log_metadata = get_metadata_from_arrow_schema(sync_table.schema, LogMetadata)
+
+    # Phase 1: Category 2 — metadata-level early rejection
+    if not check_log_passes_metadata_filters(log_metadata, sync_table.column_names, filter):
+        return []
+
+    # Infer iteration duration and resolve stride
+    iteration_duration_s = infer_iteration_duration_s(sync_table)
+    stride = resolve_iteration_stride(filter, iteration_duration_s)
+    if stride is None:
+        return []  # Log incompatible with requested stride — warning already logged
+    future_iterations, history_iterations = resolve_iteration_counts(filter, iteration_duration_s, stride)
+
+    # Phase 2: Category 3a — UUID pre-filtering (skip full scan if UUIDs specified)
+    scene_uuid_indices = None
+    if target_uuids_binary is not None:
+        scene_uuid_indices = resolve_scene_uuid_indices(sync_table, target_uuids_binary)
+        if scene_uuid_indices is None:
+            return []
+
+    # Phase 2: Category 3b — candidate scene generation
+    candidates = generate_scene_metadatas(
+        sync_table,
+        log_metadata,
+        future_iterations,
+        history_iterations,
+        iteration_duration_s,
+        scene_uuid_indices,
+        stride,
     )
 
-    # 1. Filter location & whether map API is required
-    if filter.map_api_required and log_metadata.map_metadata is None:
-        pass
-    elif (
-        filter.locations is not None
-        and log_metadata.map_metadata is not None
-        and log_metadata.map_metadata.location not in filter.locations
-    ):
-        pass
+    # Phase 3: Category 3c — scene-level filtering
+    result = filter_scene_metadata_candidates(candidates, filter, sync_table)
+    return result
 
-    elif filter.duration_s is None:
-        scene_metadatas.append(
-            SceneMetadata(
-                initial_uuid=convert_to_str_uuid(recording_table[UUID_COLUMN][start_idx].as_py()),
-                initial_idx=start_idx,
-                duration_s=(end_idx - start_idx) * log_metadata.timestep_seconds,
-                history_s=filter.history_s if filter.history_s is not None else 0.0,
-                iteration_duration_s=log_metadata.timestep_seconds,
-            )
-        )
-    else:
-        scene_uuid_set = set(filter.scene_uuids) if filter.scene_uuids is not None else None
-        step_idx = int(filter.duration_s / log_metadata.timestep_seconds)
-        all_row_uuids = recording_table[UUID_COLUMN].to_pylist()
-        history_s = filter.history_s if filter.history_s is not None else 0.0
 
-        for idx in range(start_idx, end_idx, step_idx):
-            scene_extraction_metadata: Optional[SceneMetadata] = None
-            current_uuid = convert_to_str_uuid(all_row_uuids[idx])
+# --- Category 4: Post-filtering ---
 
-            if scene_uuid_set is None:
-                scene_extraction_metadata = SceneMetadata(
-                    initial_uuid=current_uuid,
-                    initial_idx=idx,
-                    duration_s=filter.duration_s,
-                    history_s=history_s,
-                    iteration_duration_s=log_metadata.timestep_seconds,
-                )
-            elif current_uuid in scene_uuid_set:
-                scene_extraction_metadata = SceneMetadata(
-                    initial_uuid=current_uuid,
-                    initial_idx=idx,
-                    duration_s=filter.duration_s,
-                    history_s=history_s,
-                    iteration_duration_s=log_metadata.timestep_seconds,
-                )
 
-            if scene_extraction_metadata is not None:
-                # Check of timestamp threshold exceeded between previous scene, if specified in filter
-                if filter.timestamp_threshold_s is not None and len(scene_metadatas) > 0:
-                    iteration_delta = idx - scene_metadatas[-1].initial_idx
-                    if (iteration_delta * log_metadata.timestep_seconds) < filter.timestamp_threshold_s:
-                        continue
+def _apply_post_filters(scenes: List[SceneAPI], filter: SceneFilter) -> List[SceneAPI]:
+    """Apply post-filtering options (Category 4) to the collected scenes.
 
-                scene_metadatas.append(scene_extraction_metadata)
+    :param scenes: List of SceneAPI objects.
+    :param filter: The scene filter.
+    :return: Filtered list of SceneAPI objects.
+    """
+    # 4.1 Custom filter functions
+    if filter.custom_filter_fns is not None:
+        for fn in filter.custom_filter_fns:
+            scenes = [s for s in scenes if fn(s)]
 
-    scene_extraction_metadatas_ = []
-    for scene_extraction_metadata in scene_metadatas:
-        add_scene = True
-        start_idx = scene_extraction_metadata.initial_idx
-        if filter.pinhole_camera_types is not None:
-            for pinhole_camera_type in filter.pinhole_camera_types:
-                column_name = PINHOLE_CAMERA_DATA_COLUMN(pinhole_camera_type.serialize())
+    # 4.2 Chunking
+    if filter.num_chunks is not None and filter.chunk_idx is not None:
+        chunk_size = max(1, len(scenes) // filter.num_chunks)
+        start = filter.chunk_idx * chunk_size
+        end = start + chunk_size if filter.chunk_idx < filter.num_chunks - 1 else len(scenes)
+        scenes = scenes[start:end]
 
-                if (
-                    pinhole_camera_type in log_metadata.pinhole_camera_metadata
-                    and column_name in recording_table.schema.names
-                    and recording_table[column_name][start_idx].as_py() is not None
-                ):
-                    continue
-                else:
-                    add_scene = False
-                    break
+    # 4.3 Shuffle and cap max number of scenes
+    if filter.shuffle:
+        random.shuffle(scenes)
 
-        if filter.fisheye_mei_camera_types is not None:
-            for fisheye_mei_camera_type in filter.fisheye_mei_camera_types:
-                column_name = FISHEYE_CAMERA_DATA_COLUMN(fisheye_mei_camera_type.serialize())
+    if filter.max_num_scenes is not None:
+        scenes = scenes[: filter.max_num_scenes]
 
-                if (
-                    fisheye_mei_camera_type in log_metadata.fisheye_mei_camera_metadata
-                    and column_name in recording_table.schema.names
-                    and recording_table[column_name][start_idx].as_py() is not None
-                ):
-                    continue
-                else:
-                    add_scene = False
-                    break
-
-        if filter.lidar_types is not None:
-            for lidar_type in filter.lidar_types:
-                column_name = LIDAR_DATA_COLUMN(lidar_type.serialize())
-                if lidar_type not in log_metadata.lidar_metadata and column_name not in recording_table.schema.names:
-                    add_scene = False
-                    break
-        if add_scene:
-            scene_extraction_metadatas_.append(scene_extraction_metadata)
-        # scene_extraction_metadata = scene_extraction_metadatas_
-
-    del recording_table
-    return scene_extraction_metadatas_
+    return scenes

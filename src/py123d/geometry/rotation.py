@@ -71,7 +71,7 @@ class EulerAngles(ArrayMixin):
         assert array.ndim == 1
         assert array.shape[0] == len(EulerAnglesIndex)
         instance = object.__new__(cls)
-        object.__setattr__(instance, "_array", array.copy() if copy else array)
+        instance._array = array.copy() if copy else array
         return instance
 
     @classmethod
@@ -84,6 +84,11 @@ class EulerAngles(ArrayMixin):
         assert rotation_matrix.ndim == 2
         assert rotation_matrix.shape == (3, 3)
         return EulerAngles.from_array(get_euler_array_from_rotation_matrix(rotation_matrix), copy=False)
+
+    @classmethod
+    def identity(cls) -> EulerAngles:
+        """Returns the identity Euler angles representing no rotation."""
+        return EulerAngles.from_array(np.zeros(len(EulerAnglesIndex), dtype=np.float64), copy=False)
 
     @property
     def roll(self) -> float:
@@ -166,14 +171,14 @@ class Quaternion(ArrayMixin):
     def from_array(cls, array: npt.NDArray[np.float64], copy: bool = True) -> Quaternion:
         """Constructs a Quaternion from a numpy array.
 
-        :param arr: A 1D numpy array of shape (4,) containing the quaternion components [qw, qx, qy, qz].
+        :param array: A 1D numpy array of shape (4,) containing the quaternion components [qw, qx, qy, qz].
         :param copy: Whether to copy the array data, defaults to True.
         :return: A Quaternion instance.
         """
         assert array.ndim == 1
         assert array.shape[0] == len(QuaternionIndex)
         instance = object.__new__(cls)
-        object.__setattr__(instance, "_array", array.copy() if copy else array)
+        instance._array = array.copy() if copy else array
         return instance
 
     @classmethod
@@ -196,6 +201,13 @@ class Quaternion(ArrayMixin):
         :return: A Quaternion instance.
         """
         return Quaternion.from_array(get_quaternion_array_from_euler_array(euler_angles.array), copy=False)
+
+    @classmethod
+    def identity(cls) -> Quaternion:
+        """Returns the identity quaternion representing no rotation."""
+        quat = np.zeros(len(QuaternionIndex), dtype=np.float64)
+        quat[QuaternionIndex.QW] = 1.0
+        return Quaternion.from_array(quat, copy=False)
 
     @property
     def qw(self) -> float:

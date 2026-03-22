@@ -7,10 +7,10 @@ import numpy as np
 import shapely.geometry as geom
 
 from py123d.api import MapAPI, SceneAPI
-from py123d.conversion.registry.box_detection_label_registry import DefaultBoxDetectionLabel
-from py123d.datatypes.detections.box_detections import BoxDetectionWrapper
-from py123d.datatypes.detections.traffic_light_detections import TrafficLightDetectionWrapper
-from py123d.datatypes.map_objects.map_layer_types import MapLayer
+from py123d.datatypes.detections.box_detection_label import DefaultBoxDetectionLabel
+from py123d.datatypes.detections.box_detections import BoxDetectionsSE3
+from py123d.datatypes.detections.traffic_light_detections import TrafficLightDetections
+from py123d.datatypes.map_objects.map_layer_types import MapLayer, StopZoneType
 from py123d.datatypes.map_objects.map_objects import Lane
 from py123d.datatypes.vehicle_state.ego_state import EgoStateSE2, EgoStateSE3
 from py123d.geometry import BoundingBoxSE2, BoundingBoxSE3, Point2D, PoseSE2Index, Vector2D
@@ -31,12 +31,10 @@ from py123d.visualization.matplotlib.utils import (
     shapely_geometry_local_coords,
 )
 
-# from py123d.visualization.matplotlib.zebra import visualize_crosswalk_stripes
-
 
 def add_scene_on_ax(ax: plt.Axes, scene: SceneAPI, iteration: int = 0, radius: float = 80) -> plt.Axes:
-    ego_vehicle_state = scene.get_ego_state_at_iteration(iteration)
-    box_detections = scene.get_box_detections_at_iteration(iteration)
+    ego_vehicle_state = scene.get_ego_state_se3_at_iteration(iteration)
+    box_detections = scene.get_box_detections_se3_at_iteration(iteration)
     traffic_light_detections = scene.get_traffic_light_detections_at_iteration(iteration)
     map_api = scene.get_map_api()
 
@@ -71,11 +69,14 @@ def add_default_map_on_ax(
         MapLayer.CROSSWALK,
         MapLayer.INTERSECTION,
         MapLayer.WALKWAY,
+        MapLayer.STOP_ZONE,
     ]
     x_min, x_max = point_2d.x - radius, point_2d.x + radius
     y_min, y_max = point_2d.y - radius, point_2d.y + radius
     patch = geom.box(x_min, y_min, x_max, y_max)
     map_objects_dict = map_api.query(geometry=patch, layers=layers)  # , predicate="intersects")
+
+    has_no_lane_groups = len(map_objects_dict[MapLayer.LANE_GROUP]) == 0
 
     for layer, map_objects in map_objects_dict.items():
         try:
@@ -104,14 +105,36 @@ def add_default_map_on_ax(
 
             if layer in [MapLayer.LANE]:
                 lines = []
+                polygons = []
                 for map_object in map_objects:
                     map_object: Lane
                     lines.append(map_object.centerline.linestring)
+                    polygons.append(map_object.shapely_polygon)
                 if len(lines) > 0:
                     add_shapely_linestrings_to_ax(
                         ax,
                         lines,
                         CENTERLINE_CONFIG,
+                        label=layer.serialize(),
+                    )
+                if has_no_lane_groups:
+                    add_shapely_polygons_to_ax(
+                        ax,
+                        polygons,
+                        MAP_SURFACE_CONFIG[MapLayer.LANE],
+                        label=MapLayer.LANE.serialize(),
+                    )
+
+            if layer in [MapLayer.STOP_ZONE]:
+                polygons = []
+                for map_object in map_objects:
+                    if map_object.stop_zone_type != StopZoneType.TURN_STOP:
+                        polygons.append(map_object.shapely_polygon)
+                if len(polygons) > 0:
+                    add_shapely_polygons_to_ax(
+                        ax,
+                        polygons,
+                        MAP_SURFACE_CONFIG[layer],
                         label=layer.serialize(),
                     )
 
@@ -122,10 +145,10 @@ def add_default_map_on_ax(
     ax.set_title(f"Map: {map_api.location}")
 
 
-def add_box_detections_to_ax(ax: plt.Axes, box_detections: BoxDetectionWrapper) -> None:
+def add_box_detections_to_ax(ax: plt.Axes, box_detections: BoxDetectionsSE3) -> None:
     boxes_per_type: Dict[DefaultBoxDetectionLabel, List[BoundingBoxSE2]] = defaultdict(list)
     for box_detection in box_detections:
-        boxes_per_type[box_detection.metadata.default_label].append(box_detection.bounding_box_se2)
+        boxes_per_type[box_detection.attributes.default_label].append(box_detection.bounding_box_se2)
 
     for box_detection_type, bounding_boxes_se2 in boxes_per_type.items():
         plot_config = BOX_DETECTION_CONFIG[box_detection_type]
@@ -136,11 +159,9 @@ def add_ego_vehicle_to_ax(ax: plt.Axes, ego_vehicle_state: Union[EgoStateSE3, Eg
     add_bounding_boxes_to_ax(ax, [ego_vehicle_state.bounding_box_se2], EGO_VEHICLE_CONFIG)
 
 
-def add_traffic_lights_to_ax(
-    ax: plt.Axes, traffic_light_detections: TrafficLightDetectionWrapper, map_api: MapAPI
-) -> None:
+def add_traffic_lights_to_ax(ax: plt.Axes, traffic_light_detections: TrafficLightDetections, map_api: MapAPI) -> None:
     for traffic_light_detection in traffic_light_detections:
-        lane = map_api.get_map_object(traffic_light_detection.lane_id, MapLayer.LANE)
+        lane = map_api.get_map_object_in_layer(traffic_light_detection.lane_id, MapLayer.LANE)
         assert isinstance(lane, Lane), f"Lane with id {traffic_light_detection.lane_id} not found."
         if lane is not None:
             add_shapely_linestring_to_ax(

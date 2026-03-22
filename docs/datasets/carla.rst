@@ -49,19 +49,16 @@ Available Modalities
      - We included a conversion method of OpenDRIVE maps. For further information, see :class:`~py123d.api.MapAPI`.
    * - Bounding Boxes
      - ✓
-     - Depending on the collected dataset. For further information, see :class:`~py123d.datatypes.detections.BoxDetectionWrapper`.
+     - Depending on the collected dataset. For further information, see :class:`~py123d.datatypes.detections.BoxDetectionsSE3`.
    * - Traffic Lights
      - X
      - n/a
-   * - Pinhole Cameras
+   * - Cameras
      - ✓
-     - Depending on the collected dataset. For further information, see :class:`~py123d.datatypes.sensors.PinholeCamera`.
-   * - Fisheye Cameras
-     - X
-     - n/a
-   * - LiDARs
+     - Depending on the collected dataset. For further information, see :class:`~py123d.datatypes.sensors.Camera`.
+   * - Lidars
      - ✓
-     - Depending on the collected dataset. For further information, see :class:`~py123d.datatypes.sensors.LiDAR`.
+     - Depending on the collected dataset. For further information, see :class:`~py123d.datatypes.sensors.Lidar`.
 
 
 Download
@@ -79,18 +76,10 @@ Dataset Specific
 
 .. dropdown:: Box Detection Labels
 
-  .. autoclass:: py123d.conversion.registry.DefaultBoxDetectionLabel
+  .. autoclass:: py123d.parser.registry.DefaultBoxDetectionLabel
     :members:
     :no-index:
     :no-inherited-members:
-
-.. dropdown:: LiDAR Index
-
-  .. autoclass:: py123d.conversion.registry.DefaultLiDARIndex
-    :members:
-    :no-index:
-    :no-inherited-members:
-
 
 
 Dataset Issues

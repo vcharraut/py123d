@@ -1,1 +1,3 @@
-from py123d.datatypes.time.time_point import TimePoint
+from py123d.datatypes.time.timestamp import Timestamp
+
+__all__ = ["Timestamp"]

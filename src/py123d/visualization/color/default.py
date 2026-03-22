@@ -1,6 +1,6 @@
 from typing import Dict
 
-from py123d.conversion.registry.box_detection_label_registry import DefaultBoxDetectionLabel
+from py123d.datatypes.detections.box_detection_label import DefaultBoxDetectionLabel
 from py123d.datatypes.detections.traffic_light_detections import TrafficLightStatus
 from py123d.datatypes.map_objects.map_layer_types import MapLayer
 from py123d.visualization.color.color import (
@@ -82,9 +82,9 @@ MAP_SURFACE_CONFIG: Dict[MapLayer, PlotConfig] = {
         zorder=1,
     ),
     MapLayer.STOP_ZONE: PlotConfig(
-        fill_color=TAB_10[3],
+        fill_color=Color("#cd9595"),
         fill_color_alpha=1.0,
-        line_color=TAB_10[3],
+        line_color=Color("#cd9595"),
         line_color_alpha=0.0,
         line_width=linewidth,
         line_style="-",

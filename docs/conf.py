@@ -7,10 +7,20 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 
+from autoclasstoc import PublicDataAttrs
+
+
+class PublicDataAttrsNoEnum(PublicDataAttrs):
+    """Public data attributes, excluding inherited enum attrs ``name`` and ``value``."""
+
+    key = "public-attrs-no-enum"
+    exclude_pattern = ["name", "value"]
+
+
 project = "py123d"
-copyright = "2025"
+copyright = "2026"
 author = "DanielDauner"
-release = "v0.0.9"
+release = "v0.1.0"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -73,14 +83,14 @@ autodoc_default_options = {
     "inherited-members": True,
     "undoc-members": True,
     "member-order": "bysource",
-    "exclude-members": "__post_init__, __new__, __weakref__, __iter__,  __hash__, annotations, _array",
+    "exclude-members": "__post_init__, __new__, __weakref__, __iter__,  __hash__, annotations, _array, name, value",
     "imported-members": True,
 }
 
 autosummary_generate = True
 
 autoclasstoc_sections = [
-    "public-attrs",
+    "public-attrs-no-enum",
     "public-methods-without-dunders",
     "private-methods",
 ]
@@ -129,6 +139,4 @@ html_sidebars = {
 # Your conf.py already references it in html_css_files = ["custom.css"]
 
 # If you want to add custom CSS via configuration, you can use:
-html_css_files = [
-    "custom.css",
-]
+html_css_files = ["custom.css"]

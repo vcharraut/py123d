@@ -6,5 +6,6 @@ Map API
 
 
 .. autoclass:: py123d.datatypes.map_objects.MapLayer
-   :no-inherited-members:
+   :members:
+   :exclude-members: public-attrs
    :autoclasstoc:

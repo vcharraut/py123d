@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import abc
-from typing import Dict, Iterable, List, Literal, Optional, Union
+from typing import Dict, Iterable, Iterator, List, Literal, Optional, Union
 
 import shapely.geometry as geom
 
+from py123d.datatypes import MapMetadata
 from py123d.datatypes.map_objects import BaseMapObject, MapLayer
 from py123d.datatypes.map_objects.base_map_objects import MapObjectIDType
-from py123d.datatypes.metadata import MapMetadata
 from py123d.geometry import Point2D, Point3D
 
 
@@ -33,13 +33,39 @@ class MapAPI(abc.ABC):
         """
 
     @abc.abstractmethod
-    def get_map_object(self, object_id: MapObjectIDType, layer: MapLayer) -> Optional[BaseMapObject]:
+    def get_map_object_in_layer(self, object_id: MapObjectIDType, layer: MapLayer) -> Optional[BaseMapObject]:
         """Returns a :class:`~p123d.datatypes.map_objects.base_map_object.BaseMapObject` by its ID
             and :class:`~p123d.datatypes.map_objects.map_layer_types.MapLayer`.
 
         :param object_id: The ID of the map object.
         :param layer: The layer the map object belongs to.
         :return: The map object if found, None otherwise.
+        """
+
+    @abc.abstractmethod
+    def get_all_map_object_ids_in_layer(self, layer: MapLayer) -> List[MapObjectIDType]:
+        """Returns a list of all map object IDs in a given layer.
+
+        :param layer: The layer to retrieve object IDs from.
+        :return: A list of map object IDs in the specified layer.
+        """
+
+    @abc.abstractmethod
+    def get_all_map_objects_in_layer(self, layer: MapLayer) -> Iterator[BaseMapObject]:
+        """Returns an iterator of all :class:`~p123d.datatypes.map_objects.base_map_object.BaseMapObject` in a given
+            :class:`~p123d.datatypes.map_objects.map_layer_types.MapLayer`.
+
+        :param layer: The map layer to retrieve objects from.
+        :return: An iterator of all map objects in the specified layer.
+        """
+
+    @abc.abstractmethod
+    def get_all_map_objects_in_layers(self, layers: List[MapLayer]) -> Iterator[BaseMapObject]:
+        """Returns an iterator of all :class:`~p123d.datatypes.map_objects.base_map_object.BaseMapObject` in
+            the specified layers.
+
+        :param layers: A list of map layers.
+        :return: An iterator of all map objects in the specified layers
         """
 
     @abc.abstractmethod
@@ -84,11 +110,11 @@ class MapAPI(abc.ABC):
 
         Notes
         -----
-        The syntax is aligned with STRtree implementation of shapely and the corresponding ``query`` function [1]_.
+        The syntax is aligned with STRtree implementation of shapely and the corresponding ``query`` function [2]_.
 
         References
         ----------
-        .. [1] https://shapely.readthedocs.io/en/latest/strtree.html#shapely.STRtree.query
+        .. [2] https://shapely.readthedocs.io/en/latest/strtree.html#shapely.STRtree.query
 
         :param geometry: A shapely geometry or an iterable of shapely geometries to query against.
         :param layers: The map layers to query against.
@@ -127,11 +153,11 @@ class MapAPI(abc.ABC):
 
         Notes
         -----
-        The syntax is aligned with STRtree implementation of shapely and the corresponding ``query`` function [2]_.
+        The syntax is aligned with STRtree implementation of shapely and the corresponding ``query`` function [3]_.
 
         References
         ----------
-        .. [2] https://shapely.readthedocs.io/en/latest/strtree.html#shapely.STRtree.query
+        .. [3] https://shapely.readthedocs.io/en/latest/strtree.html#shapely.STRtree.query
 
 
         :param geometry: A shapely geometry or an iterable of shapely geometries to query against.
@@ -164,9 +190,9 @@ class MapAPI(abc.ABC):
         return self.map_metadata.location
 
     @property
-    def map_is_local(self) -> bool:
-        """Indicates if the map is local (map for each log) or global (map for multiple logs in dataset)."""
-        return self.map_metadata.map_is_local
+    def map_is_per_log(self) -> bool:
+        """Indicates if the map is per-log (map for each log) or global (map for multiple logs in dataset)."""
+        return self.map_metadata.map_is_per_log
 
     @property
     def map_has_z(self) -> bool:
@@ -177,3 +203,8 @@ class MapAPI(abc.ABC):
     def version(self) -> str:
         """The version of the py123d library used to create this map metadata."""
         return self.map_metadata.version
+
+    @property
+    def available_map_layers(self) -> List[MapLayer]:
+        """The available :class:`~p123d.datatypes.map_objects.map_layer_types.MapLayer` in the map."""
+        return self.get_available_map_layers()

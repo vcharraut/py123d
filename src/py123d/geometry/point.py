@@ -48,7 +48,7 @@ class Point2D(ArrayMixin):
         assert array.ndim == 1
         assert array.shape[0] == len(Point2DIndex)
         instance = object.__new__(cls)
-        object.__setattr__(instance, "_array", array.copy() if copy else array)
+        instance._array = array.copy() if copy else array
         return instance
 
     @property
@@ -139,11 +139,12 @@ class Point3D(ArrayMixin):
 
         :param array: A (3,) shaped numpy array representing the point coordinates (x,y,z).
         :param copy: Whether to copy the input array. Defaults to True.
+        :return: A new :class:`Point3D` instance.
         """
         assert array.ndim == 1
         assert array.shape[0] == len(Point3DIndex)
         instance = object.__new__(cls)
-        object.__setattr__(instance, "_array", array.copy() if copy else array)
+        instance._array = array.copy() if copy else array
         return instance
 
     @property
@@ -199,9 +200,9 @@ class Point3D(ArrayMixin):
             or a :class:`Point3D` if subtracting a vector.
         """
         if isinstance(other, Point3D):
-            return Vector3D(self.x - other.x, self.y - other.y, self.z - other.z)
+            return Vector3D.from_array(self.array - other.array, copy=False)
         elif isinstance(other, Vector3D):
-            return Point3D(self.x - other.x, self.y - other.y, self.z - other.z)
+            return Point3D.from_array(self.array - other.array, copy=False)
         return NotImplemented
 
     def __repr__(self) -> str:

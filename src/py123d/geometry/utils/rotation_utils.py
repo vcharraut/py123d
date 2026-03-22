@@ -92,7 +92,7 @@ def get_euler_array_from_rotation_matrices(rotation_matrices: npt.NDArray[np.flo
     """Convert rotation matrices to Euler angles using Tait-Bryan ZYX convention (yaw-pitch-roll).
 
     :param rotation_matrices: Rotation matrices of shape (..., 3, 3)
-    :return: Euler angles of shape (..., 3), indexed by EulerAnglesIndex
+    :return: Euler angles of shape (..., 3), indexed by :class:`~py123d.geometry.EulerAnglesIndex`
     """
     assert rotation_matrices.ndim >= 2 and rotation_matrices.shape[-2:] == (3, 3)
 
@@ -285,16 +285,15 @@ def get_rotation_matrices_from_quaternion_array(quaternion_array: npt.NDArray[np
     assert quaternion_array.ndim >= 1 and quaternion_array.shape[-1] == len(QuaternionIndex)
 
     q = normalize_quaternion_array(quaternion_array)
-
-    w = q[..., QuaternionIndex.QW]
-    x = q[..., QuaternionIndex.QX]
-    y = q[..., QuaternionIndex.QY]
-    z = q[..., QuaternionIndex.QZ]
+    qw = q[..., QuaternionIndex.QW]
+    qx = q[..., QuaternionIndex.QX]
+    qy = q[..., QuaternionIndex.QY]
+    qz = q[..., QuaternionIndex.QZ]
 
     # Precompute repeated products
-    xx, yy, zz = x * x, y * y, z * z
-    xy, xz, yz = x * y, x * z, y * z
-    wx, wy, wz = w * x, w * y, w * z
+    xx, yy, zz = qx * qx, qy * qy, qz * qz
+    xy, xz, yz = qx * qy, qx * qz, qy * qz
+    wx, wy, wz = qw * qx, qw * qy, qw * qz
 
     # Build rotation matrices using the direct algebraic formula
     R = np.empty(q.shape[:-1] + (3, 3), dtype=np.float64)
@@ -446,6 +445,70 @@ def multiply_quaternion_arrays(q1: npt.NDArray[np.float64], q2: npt.NDArray[np.f
     result[..., QuaternionIndex.QY] = qw1 * qy2 - qx1 * qz2 + qy1 * qw2 + qz1 * qx2
     result[..., QuaternionIndex.QZ] = qw1 * qz2 + qx1 * qy2 - qy1 * qx2 + qz1 * qw2
     return result
+
+
+def slerp_quaternion_arrays(
+    q1: npt.NDArray[np.float64],
+    q2: npt.NDArray[np.float64],
+    t: npt.NDArray[np.float64],
+) -> npt.NDArray[np.float64]:
+    """Spherical linear interpolation (SLERP) between two arrays of quaternions.
+
+    Interpolates along the shortest path on the unit quaternion hypersphere with constant angular velocity.
+
+    :param q1: Start quaternions of shape (..., 4), indexed by :class:`~py123d.geometry.QuaternionIndex`.
+    :param q2: End quaternions of shape (..., 4), indexed by :class:`~py123d.geometry.QuaternionIndex`.
+    :param t: Interpolation parameter(s) in [0, 1], shape (...).
+    :return: Interpolated quaternions of shape (..., 4), indexed by :class:`~py123d.geometry.QuaternionIndex`.
+    """
+    assert q1.shape[-1] == q2.shape[-1] == len(QuaternionIndex)
+
+    dot = np.sum(q1 * q2, axis=-1, keepdims=True)
+
+    # Ensure shortest path by flipping q2 where dot product is negative
+    q2 = np.where(dot < 0, -q2, q2)
+    dot = np.abs(dot)
+
+    t_expanded = t[..., np.newaxis]
+    theta = np.arccos(np.clip(dot, -1.0, 1.0))
+    sin_theta = np.sin(theta)
+
+    # SLERP weights (suppress expected division-by-zero for near-identical quaternions)
+    near = sin_theta < 1e-6
+    safe_sin_theta = np.where(near, 1.0, sin_theta)
+    w1 = np.sin((1.0 - t_expanded) * theta) / safe_sin_theta
+    w2 = np.sin(t_expanded * theta) / safe_sin_theta
+
+    # Fall back to NLERP for nearly-identical quaternions
+    w1 = np.where(near, 1.0 - t_expanded, w1)
+    w2 = np.where(near, t_expanded, w2)
+
+    return normalize_quaternion_array(w1 * q1 + w2 * q2)
+
+
+def nlerp_quaternion_arrays(
+    q1: npt.NDArray[np.float64],
+    q2: npt.NDArray[np.float64],
+    t: npt.NDArray[np.float64],
+) -> npt.NDArray[np.float64]:
+    """Normalized linear interpolation (NLERP) between two arrays of quaternions.
+
+    Faster than SLERP but does not maintain constant angular velocity.
+
+    :param q1: Start quaternions of shape (..., 4), indexed by :class:`~py123d.geometry.QuaternionIndex`.
+    :param q2: End quaternions of shape (..., 4), indexed by :class:`~py123d.geometry.QuaternionIndex`.
+    :param t: Interpolation parameter(s) in [0, 1], shape (...).
+    :return: Interpolated quaternions of shape (..., 4), indexed by :class:`~py123d.geometry.QuaternionIndex`.
+    """
+    assert q1.shape[-1] == q2.shape[-1] == len(QuaternionIndex)
+
+    dot = np.sum(q1 * q2, axis=-1, keepdims=True)
+
+    # Ensure shortest path
+    q2 = np.where(dot < 0, -q2, q2)
+
+    t_expanded = t[..., np.newaxis]
+    return normalize_quaternion_array((1.0 - t_expanded) * q1 + t_expanded * q2)
 
 
 def get_q_matrices(quaternion_array: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:

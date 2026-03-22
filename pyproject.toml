@@ -13,12 +13,13 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: Apache Software License",
 ]
 name = "py123d"
-version = "0.0.9"
+version = "0.1.0"
 authors = [{ name = "Daniel Dauner", email = "daniel.dauner@gmail.com" }]
-description = "A Library for Driving Datasets."
+description = "123D: A Unified Library for Multi-Modal Autonomous Driving Data."
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "Apache-2.0"}
@@ -41,12 +42,13 @@ dependencies = [
     "hydra_colorlog",
     "hydra-core",
     "trimesh",
-    "viser",
+    "viser>=1.0.24",
     "laspy[lazrs]",
     "DracoPy",
     "omegaconf",
     "typing-extensions",
     "requests",
+    "cachetools", # Should be remove again, if functools are use
 ]
 
 [project.scripts]
@@ -84,7 +86,8 @@ nuscenes = [
     "nuscenes-devkit==1.2.0",
 ]
 waymo = [
-    "waymo-open-dataset-tf-2-12-0==1.6.7",
+    "tensorflow-cpu>=2.13",
+    "protobuf>=6.31",
 ]
 ffmpeg = [
     "imageio[ffmpeg]",
@@ -94,7 +97,7 @@ ffmpeg = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-py123d = ["script/**/*.yaml", "script/**/*.yml"]
+py123d = ["py.typed", "**/*.yaml", "**/*.yml", "**/*.proto", "**/*.xodr.gz"]
 
 [project.urls]
 "Homepage" = "https://github.com/autonomousvision/py123d"
@@ -130,11 +133,18 @@ lint.ignore = [
     "PLW2901",  # For loop variable overwritten.
     "PLW0642",  # Reassigned self in instance method.
     "PLR0904",  # Checks for classes with too many public methods
+    "PLR0917",  # Checks for function definitions that include too many positional arguments.
+    "PLR0914",  # Checks for functions that include too many local variables.
+    "PLR6301",  # Checks for the presence of unused self parameter in methods definitions.
+    "PLC0206",  # Checks for dictionary iterations that extract the dictionary value via explicit indexing, instead of using .items().
 ]
 
-exclude = ["__init__.py"]
-fixable = ["ALL"]
-unfixable = []
+exclude = [
+    "__init__.py",
+    "src/py123d/conversion/datasets/wod/waymo_open_dataset/protos",
+]
+lint.fixable = ["ALL"]
+lint.unfixable = []
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

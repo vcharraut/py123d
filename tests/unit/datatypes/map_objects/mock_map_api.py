@@ -1,4 +1,4 @@
-from typing import Dict, Iterable, List, Optional, Union
+from typing import Dict, Iterable, Iterator, List, Optional, Union
 
 import shapely.geometry as geom
 from typing_extensions import Literal
@@ -68,13 +68,13 @@ class MockMapAPI(MapAPI):
             log_name="test_log_name",
             location="test_location",
             map_has_z=True,
-            map_is_local=True,
+            map_is_per_log=True,
         )
 
     def get_available_map_layers(self) -> List[MapLayer]:
         return list(self._layers.keys())
 
-    def get_map_object(self, object_id: MapObjectIDType, layer: MapLayer) -> Optional[BaseMapObject]:
+    def get_map_object_in_layer(self, object_id: MapObjectIDType, layer: MapLayer) -> Optional[BaseMapObject]:
         target_layer = self._layers.get(layer, [])
         map_object: Optional[BaseMapObject] = None
         for obj in target_layer:
@@ -82,6 +82,19 @@ class MockMapAPI(MapAPI):
                 map_object = obj
                 break
         return map_object
+
+    def get_all_map_object_ids_in_layer(self, layer: MapLayer) -> List[MapObjectIDType]:
+        target_layer = self._layers.get(layer, [])
+        return [obj.object_id for obj in target_layer]
+
+    def get_all_map_objects_in_layer(self, layer: MapLayer) -> Iterator[BaseMapObject]:
+        target_layer = self._layers.get(layer, [])
+        for obj in target_layer:
+            yield obj
+
+    def get_all_map_objects_in_layers(self, layers: List[MapLayer]) -> Iterator[BaseMapObject]:
+        for layer in layers:
+            yield from self.get_all_map_objects_in_layer(layer)
 
     def get_map_objects_in_radius(
         self,

@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import enum
-from typing import Union
+import sys
+from typing import List, Optional, Sequence, Type, Union
+
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:
+    from typing_extensions import Self
 
 
 class classproperty(object):
@@ -29,18 +35,18 @@ class SerialIntEnum(enum.Enum):
         return self.name.lower() if lower else self.name
 
     @classmethod
-    def deserialize(cls, key: str) -> SerialIntEnum:
+    def deserialize(cls, key: str) -> Self:
         """Deserialize the type when loading from a string."""
         # Allow for lower/upper case letters during deserialize
         return cls.__members__[key.upper()] if key.islower() else cls.__members__[key]
 
     @classmethod
-    def from_int(cls, value: int) -> SerialIntEnum:
+    def from_int(cls, value: int) -> Self:
         """Get the enum from an int."""
         return cls(value)
 
     @classmethod
-    def from_arbitrary(cls, value: Union[int, str, SerialIntEnum]) -> SerialIntEnum:
+    def from_arbitrary(cls, value: Union[int, str, SerialIntEnum]) -> Self:
         """Get the enum from an int, string, or enum instance."""
         if isinstance(value, cls):
             return value
@@ -50,3 +56,14 @@ class SerialIntEnum(enum.Enum):
             return cls.deserialize(value)
         else:
             raise ValueError(f"Invalid value for {cls.__name__}: {value}")
+
+
+def resolve_enum_arguments(
+    serial_enum_cls: Type[SerialIntEnum], input: Optional[Sequence[Union[int, str, SerialIntEnum]]]
+) -> Optional[List[SerialIntEnum]]:
+    """Resolve a list of arbitrary enum representations to proper enum instances."""
+    if input is None:
+        return None
+    if not isinstance(input, (list, tuple)):
+        raise TypeError(f"input must be a list of {serial_enum_cls.__name__}, got {type(input)}")
+    return [serial_enum_cls.from_arbitrary(value) for value in input]

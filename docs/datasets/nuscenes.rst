@@ -3,9 +3,9 @@
 nuScenes
 --------
 
-The nuScenes dataset is multi-modal autonomous driving dataset that includes data from cameras, LiDARs, and radars, along with detailed annotations from Boston and Singapore.
+The nuScenes dataset is multi-modal autonomous driving dataset that includes data from cameras, Lidars, and radars, along with detailed annotations from Boston and Singapore.
 In total, the dataset contains 1000 driving logs, each of 20 second duration, resulting in 5.5 hours of data.
-All logs include ego-vehicle data, camera images, LiDAR point clouds, bounding boxes, and map data.
+All logs include ego-vehicle data, camera images, Lidar point clouds, bounding boxes, and map data.
 
 
 .. dropdown:: Overview
@@ -55,39 +55,31 @@ Available Modalities
      - The HD-Maps are in 2D vector format and defined per-location. For more information, see :class:`~py123d.api.MapAPI`.
    * - Bounding Boxes
      - ✓
-     - The bounding boxes are available with the :class:`~py123d.conversion.registry.NuScenesBoxDetectionLabel`. For more information, see :class:`~py123d.datatypes.detections.BoxDetectionWrapper`.
+     - The bounding boxes are available with the :class:`~py123d.parser.registry.NuScenesBoxDetectionLabel`. For more information, see :class:`~py123d.datatypes.detections.BoxDetectionsSE3`.
    * - Traffic Lights
      - X
      -
-   * - Pinhole Cameras
+   * - Cameras
      - ✓
      -
-      nuScenes includes 6x :class:`~py123d.datatypes.sensors.PinholeCamera`:
+      nuScenes includes 6x :class:`~py123d.datatypes.sensors.Camera`:
 
-      - :class:`~py123d.datatypes.sensors.PinholeCameraType.PCAM_F0`: CAM_FRONT
-      - :class:`~py123d.datatypes.sensors.PinholeCameraType.PCAM_R0`: CAM_FRONT_RIGHT
-      - :class:`~py123d.datatypes.sensors.PinholeCameraType.PCAM_R1`: CAM_BACK_RIGHT
-      - :class:`~py123d.datatypes.sensors.PinholeCameraType.PCAM_L0`: CAM_FRONT_LEFT
-      - :class:`~py123d.datatypes.sensors.PinholeCameraType.PCAM_L1`: CAM_BACK_LEFT
-      - :class:`~py123d.datatypes.sensors.PinholeCameraType.PCAM_B0`: CAM_BACK
-   * - Fisheye Cameras
-     - X
-     -
-   * - LiDARs
+      - :class:`~py123d.datatypes.sensors.CameraID.PCAM_F0`: CAM_FRONT
+      - :class:`~py123d.datatypes.sensors.CameraID.PCAM_R0`: CAM_FRONT_RIGHT
+      - :class:`~py123d.datatypes.sensors.CameraID.PCAM_R1`: CAM_BACK_RIGHT
+      - :class:`~py123d.datatypes.sensors.CameraID.PCAM_L0`: CAM_FRONT_LEFT
+      - :class:`~py123d.datatypes.sensors.CameraID.PCAM_L1`: CAM_BACK_LEFT
+      - :class:`~py123d.datatypes.sensors.CameraID.PCAM_B0`: CAM_BACK
+
+   * - Lidars
      - ✓
-     - nuScenes has one :class:`~py123d.datatypes.sensors.LiDAR` of type :class:`~py123d.datatypes.sensors.LiDARType.LIDAR_TOP`.
+     - nuScenes has one :class:`~py123d.datatypes.sensors.Lidar` of type :class:`~py123d.datatypes.sensors.LidarID.LIDAR_TOP`.
 .. dropdown:: Dataset Specific
 
-  .. autoclass:: py123d.conversion.registry.NuScenesBoxDetectionLabel
+  .. autoclass:: py123d.parser.registry.NuScenesBoxDetectionLabel
     :members:
     :no-index:
     :no-inherited-members:
-
-  .. autoclass:: py123d.conversion.registry.NuScenesLiDARIndex
-    :members:
-    :no-index:
-    :no-inherited-members:
-
 
 Download
 ~~~~~~~~
@@ -202,7 +194,7 @@ You can convert the interpolated variant by running:
   # or
   py123d-conversion datasets=["nuscenes-interpolated-mini"]
 
-The interpolated conversion uses the :class:`~py123d.conversion.datasets.nuscenes.nuscenes_interpolated_converter.NuScenesInterpolatedConverter`.
+The interpolated conversion uses the :class:`~py123d.parser.datasets.nuscenes.nuscenes_interpolated_converter.NuScenesInterpolatedConverter`.
 
 .. dropdown:: Interpolation Details
 
@@ -232,7 +224,7 @@ The interpolated conversion uses the :class:`~py123d.conversion.datasets.nuscene
     are excluded at interpolated frames and only written at their actual keyframe.
   - ``num_lidar_points`` is set to ``0`` for interpolated frames.
 
-  **LiDAR.**
+  **Lidar.**
   Each selected 10 Hz frame uses the actual lidar point cloud file from the corresponding
   ``sample_data`` sweep, so no point cloud interpolation is performed.
 
