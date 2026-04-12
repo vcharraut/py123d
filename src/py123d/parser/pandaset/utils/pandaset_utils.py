@@ -1,6 +1,7 @@
 import gzip
 import json
 import pickle
+import warnings
 from pathlib import Path
 from typing import Any, Dict, Union
 
@@ -29,7 +30,9 @@ def read_pkl_gz(pkl_gz_file: Union[Path, str]) -> Any:
     :return: The deserialized Python object.
     """
     with gzip.open(pkl_gz_file, "rb") as f:
-        pkl_data = pickle.load(f)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="dtype.*align", category=DeprecationWarning)
+            pkl_data = pickle.load(f)
     return pkl_data
 
 
