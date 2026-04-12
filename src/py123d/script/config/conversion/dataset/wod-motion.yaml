@@ -2,7 +2,7 @@ parser:
   _target_: py123d.parser.wod.wod_motion_parser.WODMotionParser
   _convert_: 'all'
 
-  splits: ["wod-motion_val"]
+  splits: ["wod-motion_val", "wod-motion_train", "wod-motion_test"]
   wod_motion_data_root: ${dataset_paths.wod_motion_data_root}
   add_dummy_lane_groups: false
 
