@@ -466,6 +466,12 @@ def _extend_lane_with_shoulder(
         inner_offset_mean = float(np.mean(inner_offsets))
     inner_sign = 1.0 if np.isclose(inner_offset_mean, 0.0) else float(np.sign(inner_offset_mean))
 
+    # For left lanes (id > 0), polylines are flipped so travel direction is opposite
+    # to reference line direction. inner_sign was computed with reference-direction yaws,
+    # but offset_points_perpendicular uses travel-direction yaws. Negate to compensate.
+    if lane_helper.id > 0:
+        inner_sign = -inner_sign
+
     # Offset new centerline to create inner/outer boundaries
     inner_offset = inner_sign * width_mean / 2.0
     outer_offset = -inner_offset
