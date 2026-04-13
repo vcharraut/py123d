@@ -466,9 +466,10 @@ def _extend_lane_with_shoulder(
         inner_offset_mean = float(np.mean(inner_offsets))
     inner_sign = 1.0 if np.isclose(inner_offset_mean, 0.0) else float(np.sign(inner_offset_mean))
 
-    # For left lanes (id > 0), polylines are flipped so travel direction is opposite
-    # to reference line direction. inner_sign was computed with reference-direction yaws,
-    # but offset_points_perpendicular uses travel-direction yaws. Negate to compensate.
+    # Positive-lane SE2 polylines are reversed in sample order, but their stored yaws still
+    # come from the reference-line interpolation. inner_sign is therefore measured in the
+    # reference frame here, while the reconstructed centerline yaws below are in travel frame.
+    # For left lanes (id > 0), those lateral signs are opposite, so negate before offsetting.
     if lane_helper.id > 0:
         inner_sign = -inner_sign
 
