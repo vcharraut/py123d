@@ -7,8 +7,11 @@ functions used by :class:`NuScenesParser` for both 2Hz and 10Hz modes.
 from __future__ import annotations
 
 import bisect
+import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 from pyquaternion import Quaternion
@@ -39,15 +42,11 @@ from py123d.parser.nuscenes.utils.nuscenes_constants import (
     NUSCENES_CAMERA_IDS,
     NUSCENES_DETECTION_NAME_DICT,
     NUSCENES_LIDAR_SWEEP_DURATION_US,
-    TARGET_DT,
 )
 
 check_dependencies(["nuscenes"], "nuscenes")
 from nuscenes import NuScenes
 from nuscenes.can_bus.can_bus_api import NuScenesCanBus
-
-# Target time interval in microseconds (10Hz = 100ms)
-_TARGET_DT_US: int = int(TARGET_DT * 1e6)
 
 # Tolerance for matching cameras to lidar sweep timestamps.
 # Since we select the last camera *before* the lidar timestamp, the offset can be up to one full
@@ -511,25 +510,168 @@ def extract_cameras_from_timeline(
     return _extract_camera_from_sample_data(nusc, cam_data, camera_type, nuscenes_data_root, pinhole_cameras_metadata)
 
 
+# ------------------------------------------------------------------------------------------------------------------
+# Ego pose timeline and interpolation helpers
+# ------------------------------------------------------------------------------------------------------------------
+
+
+def collect_ego_pose_timeline(nusc: NuScenes, scene: Dict[str, Any]) -> List[Tuple[int, PoseSE3]]:
+    """Collects an ego pose timeline from the lidar sweep sample_data records.
+
+    The lidar runs at ~20Hz and provides the densest ego pose source in nuScenes.
+    The returned list is sorted by timestamp and can be used for interpolation.
+
+    :param nusc: The NuScenes database instance.
+    :param scene: The scene record.
+    :return: Sorted list of (timestamp_us, ego_to_global) tuples.
+    """
+    first_sample = nusc.get("sample", scene["first_sample_token"])
+    lidar_sd_token = first_sample["data"]["LIDAR_TOP"]
+
+    timeline: List[Tuple[int, PoseSE3]] = []
+    current = nusc.get("sample_data", lidar_sd_token)
+    while current:
+        ego_pose = nusc.get("ego_pose", current["ego_pose_token"])
+        pose = PoseSE3.from_R_t(
+            rotation=np.array(ego_pose["rotation"], dtype=np.float64),
+            translation=np.array(ego_pose["translation"], dtype=np.float64),
+        )
+        timeline.append((current["timestamp"], pose))
+        if current["next"]:
+            current = nusc.get("sample_data", current["next"])
+        else:
+            break
+
+    return timeline
+
+
+def interpolate_ego_pose(
+    target_timestamp: int,
+    ego_pose_timeline: List[Tuple[int, PoseSE3]],
+) -> Optional[PoseSE3]:
+    """Interpolates the ego pose at an arbitrary timestamp using SLERP/LERP.
+
+    Uses the two nearest ego poses from the timeline (typically ~20Hz lidar-derived).
+    Translation is linearly interpolated; rotation uses SLERP via pyquaternion.
+
+    If the target timestamp falls outside the timeline range, the nearest boundary pose
+    is returned without extrapolation.
+
+    :param target_timestamp: Target timestamp in microseconds.
+    :param ego_pose_timeline: Sorted list of (timestamp_us, ego_to_global) from
+        :func:`collect_ego_pose_timeline`.
+    :return: Interpolated ego-to-global pose, or None if the timeline is empty.
+    """
+    if not ego_pose_timeline:
+        return None
+
+    timestamps = [t for t, _ in ego_pose_timeline]
+    idx = bisect.bisect_right(timestamps, target_timestamp)
+
+    # Boundary cases: clamp to nearest pose (no extrapolation)
+    if idx == 0:
+        return ego_pose_timeline[0][1]
+    if idx >= len(timestamps):
+        return ego_pose_timeline[-1][1]
+
+    # Interpolate between the two surrounding poses
+    t0, pose0 = ego_pose_timeline[idx - 1]
+    t1, pose1 = ego_pose_timeline[idx]
+
+    delta = t1 - t0
+    if delta == 0:
+        return pose0
+
+    alpha = (target_timestamp - t0) / delta
+
+    # Linear interpolation of translation
+    interp_x = pose0.x + alpha * (pose1.x - pose0.x)
+    interp_y = pose0.y + alpha * (pose1.y - pose0.y)
+    interp_z = pose0.z + alpha * (pose1.z - pose0.z)
+
+    # SLERP for rotation
+    q0 = Quaternion(pose0.qw, pose0.qx, pose0.qy, pose0.qz)
+    q1 = Quaternion(pose1.qw, pose1.qx, pose1.qy, pose1.qz)
+    q_interp = Quaternion.slerp(q0, q1, alpha)
+
+    return PoseSE3(
+        x=interp_x,
+        y=interp_y,
+        z=interp_z,
+        qw=q_interp.w,
+        qx=q_interp.x,
+        qy=q_interp.y,
+        qz=q_interp.z,
+    )
+
+
+def _extract_camera_with_interpolated_pose(
+    cam_data: Dict[str, Any],
+    camera_type: CameraID,
+    nuscenes_data_root: Path,
+    pinhole_cameras_metadata: Dict[CameraID, PinholeCameraMetadata],
+    ego_pose_timeline: List[Tuple[int, PoseSE3]],
+) -> Optional[ParsedCamera]:
+    """Extracts a ParsedCamera using an interpolated ego pose at the camera's timestamp.
+
+    Instead of using the discrete ego_pose_token from the camera's sample_data record,
+    this function interpolates the ego pose from the lidar-derived ego pose timeline
+    (~20Hz) to the exact camera capture time. This produces smoother, more accurate
+    camera-to-global poses that reduce lidar-to-camera projection misalignment.
+
+    :param cam_data: A camera sample_data record.
+    :param camera_type: The CameraID enum for this camera.
+    :param nuscenes_data_root: Path to the nuScenes dataset root.
+    :param pinhole_cameras_metadata: Camera metadata dict keyed by CameraID.
+    :param ego_pose_timeline: Sorted ego pose timeline from :func:`collect_ego_pose_timeline`.
+    :return: ParsedCamera with interpolated pose, or None if the file doesn't exist.
+    """
+    cam_path = nuscenes_data_root / str(cam_data["filename"])
+    if not (cam_path.exists() and cam_path.is_file()):
+        return None
+
+    ego_to_global = interpolate_ego_pose(cam_data["timestamp"], ego_pose_timeline)
+    if ego_to_global is None:
+        return None
+
+    camera_to_global_se3 = rel_to_abs_se3(
+        origin=ego_to_global,
+        pose_se3=pinhole_cameras_metadata[camera_type].camera_to_imu_se3,
+    )
+
+    return ParsedCamera(
+        metadata=pinhole_cameras_metadata[camera_type],
+        timestamp=Timestamp.from_us(cam_data["timestamp"]),
+        camera_to_global_se3=camera_to_global_se3,
+        dataset_root=nuscenes_data_root,
+        relative_path=cam_path.relative_to(nuscenes_data_root),
+    )
+
+
 def find_nearest_cameras_for_sweep(
     nusc: NuScenes,
     target_timestamp: int,
     camera_timelines: Dict[str, List[Dict[str, Any]]],
     nuscenes_data_root: Path,
     pinhole_cameras_metadata: Optional[Dict[CameraID, PinholeCameraMetadata]],
+    ego_pose_timeline: Optional[List[Tuple[int, PoseSE3]]] = None,
 ) -> List[ParsedCamera]:
-    """Finds the last camera observation at or before a given sweep timestamp for each channel.
+    """Finds the closest camera observation to a given sweep timestamp for each channel.
 
-    This mirrors the keyframe convention where ``sample["data"]["CAM_*"]`` points to the camera
-    image captured during (just before completion of) the lidar sweep. For consistency, at
-    non-keyframe timestamps we select the most recent camera record whose timestamp is
-    <= the target lidar sweep timestamp, within a tolerance of 100 ms.
+    For each camera channel, searches both backward and forward from the target timestamp
+    and selects the temporally closest record within a tolerance of 100 ms.
+
+    When *ego_pose_timeline* is provided, camera poses are computed by SLERP/LERP
+    interpolation of the lidar-derived ego pose timeline to the exact camera capture
+    timestamp, instead of using the discrete ego_pose_token.
 
     :param nusc: The NuScenes database instance.
     :param target_timestamp: Target timestamp in microseconds (lidar sweep time).
     :param camera_timelines: Camera timelines from :func:`collect_camera_timelines`.
     :param nuscenes_data_root: Path to the nuScenes dataset root.
     :param pinhole_cameras_metadata: Camera metadata dict keyed by camera ID.
+    :param ego_pose_timeline: Optional sorted ego pose timeline from
+        :func:`collect_ego_pose_timeline`. When provided, camera poses are interpolated.
     :return: List of ParsedCamera for cameras within tolerance of the target timestamp.
     """
     if pinhole_cameras_metadata is None:
@@ -545,23 +687,32 @@ def find_nearest_cameras_for_sweep(
         if not timeline:
             continue
 
-        # Find the last camera record at or before the target timestamp.
-        # bisect_right gives the insertion point *after* any equal entries,
-        # so idx-1 is the last entry with timestamp <= target_timestamp.
         timestamps = [sd["timestamp"] for sd in timeline]
         idx = bisect.bisect_right(timestamps, target_timestamp)
 
-        if idx == 0:
-            continue  # no camera record at or before the target
+        # Consider the entry just before and just after the target timestamp.
+        candidates = []
+        if idx > 0:
+            candidates.append(idx - 1)
+        if idx < len(timestamps):
+            candidates.append(idx)
 
-        best_idx = idx - 1
-        if target_timestamp - timestamps[best_idx] > _CAMERA_TIMESTAMP_TOLERANCE_US:
+        if not candidates:
+            continue
+
+        best_idx = min(candidates, key=lambda j: abs(timestamps[j] - target_timestamp))
+        if abs(timestamps[best_idx] - target_timestamp) > _CAMERA_TIMESTAMP_TOLERANCE_US:
             continue
 
         cam_data = timeline[best_idx]
-        parsed_camera = _extract_camera_from_sample_data(
-            nusc, cam_data, camera_type, nuscenes_data_root, pinhole_cameras_metadata
-        )
+        if ego_pose_timeline is not None:
+            parsed_camera = _extract_camera_with_interpolated_pose(
+                cam_data, camera_type, nuscenes_data_root, pinhole_cameras_metadata, ego_pose_timeline
+            )
+        else:
+            parsed_camera = _extract_camera_from_sample_data(
+                nusc, cam_data, camera_type, nuscenes_data_root, pinhole_cameras_metadata
+            )
         if parsed_camera is not None:
             camera_data_list.append(parsed_camera)
 
@@ -632,65 +783,18 @@ def extract_lidar_from_sample_data(
 # ------------------------------------------------------------------------------------------------------------------
 
 
-def select_10hz_sweeps(
-    lidar_timeline: List[Dict[str, Any]],
-    keyframe_timestamps: List[int],
-) -> List[Dict[str, Any]]:
-    """Selects approximately 10Hz sweeps from the ~20Hz lidar timeline.
+def subsample_sweeps(lidar_timeline: List[Dict[str, Any]], step: int = 2) -> List[Dict[str, Any]]:
+    """Subsamples the lidar sweep timeline by taking every *step*-th entry.
 
-    Between each pair of consecutive keyframes, distributes intermediate timestamps at
-    regular intervals and picks the closest lidar sweep for each. Keyframes are always included.
+    The timeline from :func:`collect_lidar_sweep_timeline` starts at the first keyframe
+    and ends at the last keyframe, running at ~20Hz. With the default ``step=2`` the
+    output is ~10Hz with consistent spacing determined solely by lidar hardware timing.
 
     :param lidar_timeline: Full lidar sweep timeline from :func:`collect_lidar_sweep_timeline`.
-    :param keyframe_timestamps: Sorted list of keyframe timestamps in microseconds.
-    :return: Selected sweeps at approximately 10Hz, sorted by timestamp.
+    :param step: Take every *step*-th sweep (default 2 → ~10Hz from ~20Hz input).
+    :return: Subsampled sweeps in chronological order.
     """
-    if not lidar_timeline:
-        return []
-
-    sweep_timestamps = np.array([s["timestamp"] for s in lidar_timeline])
-    kf_set = set(keyframe_timestamps)
-    selected_tokens: set = set()
-    selected: List[Dict[str, Any]] = []
-
-    # Always include all keyframe sweeps
-    for sweep in lidar_timeline:
-        if sweep["is_key_frame"] and sweep["timestamp"] in kf_set:
-            selected_tokens.add(sweep["token"])
-            selected.append(sweep)
-
-    # Between each pair of consecutive keyframes, add intermediate sweeps at ~10Hz
-    kf_sorted = sorted(keyframe_timestamps)
-    for kf_idx in range(len(kf_sorted) - 1):
-        kf_ts = kf_sorted[kf_idx]
-        next_kf_ts = kf_sorted[kf_idx + 1]
-        delta = next_kf_ts - kf_ts
-        n_intervals = max(1, round(delta / _TARGET_DT_US))
-
-        for i in range(1, n_intervals):
-            target_ts = kf_ts + i * (delta / n_intervals)
-
-            # Binary search for closest lidar sweep
-            idx = int(np.searchsorted(sweep_timestamps, target_ts))
-            candidates = []
-            if idx > 0:
-                candidates.append(idx - 1)
-            if idx < len(sweep_timestamps):
-                candidates.append(idx)
-
-            if not candidates:
-                continue
-
-            best_idx = min(candidates, key=lambda j: abs(int(sweep_timestamps[j]) - target_ts))
-            sweep = lidar_timeline[best_idx]
-
-            if sweep["token"] not in selected_tokens:
-                selected_tokens.add(sweep["token"])
-                selected.append(sweep)
-
-    # Sort by timestamp
-    selected.sort(key=lambda s: s["timestamp"])
-    return selected
+    return lidar_timeline[::step]
 
 
 def find_surrounding_keyframes(

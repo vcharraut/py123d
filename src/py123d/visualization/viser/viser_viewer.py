@@ -38,24 +38,24 @@ def _build_titlebar() -> TitlebarConfig:
         TitlebarButton(
             text="Getting Started",
             icon=None,
-            href="https://autonomousvision.github.io/py123d",
+            href="https://kesai.eu/py123d",
         ),
         TitlebarButton(
             text="Github",
             icon="GitHub",
-            href="https://github.com/autonomousvision/py123d",
+            href="https://github.com/kesai-labs/py123d",
         ),
         TitlebarButton(
             text="Documentation",
             icon="Description",
-            href="https://autonomousvision.github.io/py123d",
+            href="https://kesai.eu/py123d",
         ),
     )
     image = TitlebarImage(
-        image_url_light="https://autonomousvision.github.io/py123d/_static/123D_logo_transparent_black.svg",
-        image_url_dark="https://autonomousvision.github.io/py123d/_static/123D_logo_transparent_white.svg",
+        image_url_light="https://kesai.eu/py123d/_static/123D_logo_transparent_black.svg",
+        image_url_dark="https://kesai.eu/py123d/_static/123D_logo_transparent_white.svg",
         image_alt="123D",
-        href="https://autonomousvision.github.io/py123d/",
+        href="https://kesai.eu/py123d/",
     )
     return TitlebarConfig(buttons=buttons, image=image)
 

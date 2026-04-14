@@ -43,7 +43,9 @@ from py123d.parser.nuscenes.utils.nuscenes_constants import (
     TARGET_DT,
 )
 from py123d.parser.nuscenes.utils.nuscenes_extraction import (
+    _extract_camera_with_interpolated_pose,
     collect_camera_timelines,
+    collect_ego_pose_timeline,
     collect_keyframe_samples,
     collect_lidar_sweep_timeline,
     extract_cameras_from_timeline,
@@ -58,7 +60,7 @@ from py123d.parser.nuscenes.utils.nuscenes_extraction import (
     get_nuscenes_lidar_metadata_from_scene,
     get_nuscenes_pinhole_camera_metadata_from_scene,
     interpolate_box_detections,
-    select_10hz_sweeps,
+    subsample_sweeps,
 )
 
 check_dependencies(["nuscenes"], "nuscenes")
@@ -313,7 +315,6 @@ class NuScenesLogParser(BaseLogParser):
 
             lidar_timeline = collect_lidar_sweep_timeline(nusc, scene)
             keyframe_samples = collect_keyframe_samples(nusc, scene)
-            keyframe_timestamps = [s["timestamp"] for s in keyframe_samples]
 
             keyframe_detections: Dict[str, BoxDetectionsSE3] = {}
             for sample in keyframe_samples:
@@ -321,22 +322,16 @@ class NuScenesLogParser(BaseLogParser):
                     nusc, sample, box_detections_metadata
                 )
 
-            selected_sweeps = select_10hz_sweeps(lidar_timeline, keyframe_timestamps)
+            selected_sweeps = subsample_sweeps(lidar_timeline)
             camera_timelines = collect_camera_timelines(nusc, scene)
+            ego_pose_timeline = collect_ego_pose_timeline(nusc, scene)
 
             for sweep in selected_sweeps:
                 timestamp = Timestamp.from_us(sweep["timestamp"])
                 ego_state = extract_ego_state_from_sample_data(nusc, sweep, can_bus, self._scene_name, ego_metadata)
 
-                if sweep["is_key_frame"]:
-                    sample = nusc.get("sample", sweep["sample_token"])
+                if sweep["is_key_frame"] and sweep["sample_token"] in keyframe_detections:
                     box_detections = keyframe_detections[sweep["sample_token"]]
-                    parsed_cameras = extract_nuscenes_cameras(
-                        nusc=nusc,
-                        sample=sample,
-                        nuscenes_data_root=self._nuscenes_data_root,
-                        pinhole_cameras_metadata=pinhole_cameras_metadata,
-                    )
                 else:
                     prev_kf, next_kf = find_surrounding_keyframes(sweep["timestamp"], keyframe_samples)
                     if prev_kf is not None and next_kf is not None:
@@ -355,13 +350,14 @@ class NuScenesLogParser(BaseLogParser):
                             box_detections=[], timestamp=timestamp, metadata=box_detections_metadata
                         )
 
-                    parsed_cameras = find_nearest_cameras_for_sweep(
-                        nusc=nusc,
-                        target_timestamp=sweep["timestamp"],
-                        camera_timelines=camera_timelines,
-                        nuscenes_data_root=self._nuscenes_data_root,
-                        pinhole_cameras_metadata=pinhole_cameras_metadata,
-                    )
+                parsed_cameras = find_nearest_cameras_for_sweep(
+                    nusc=nusc,
+                    target_timestamp=sweep["timestamp"],
+                    camera_timelines=camera_timelines,
+                    nuscenes_data_root=self._nuscenes_data_root,
+                    pinhole_cameras_metadata=pinhole_cameras_metadata,
+                    ego_pose_timeline=ego_pose_timeline,
+                )
 
                 parsed_lidar = extract_lidar_from_sample_data(
                     sweep, nuscenes_data_root=self._nuscenes_data_root, lidar_metadata=lidar_metadata
@@ -377,7 +373,7 @@ class NuScenesLogParser(BaseLogParser):
             self._release_nusc()
 
     # ------------------------------------------------------------------------------------------------------------------
-    # Async iteration (identical for 2Hz and 10Hz — each modality at its native rate)
+    # Async iteration (native rates for 2Hz; subsampled to ~10Hz for interpolated mode)
     # ------------------------------------------------------------------------------------------------------------------
 
     def iter_modalities_async(self) -> Iterator[BaseModality]:
@@ -410,7 +406,7 @@ class NuScenesLogParser(BaseLogParser):
             yield extract_ego_state_from_sample_data(nusc, sweep, can_bus, self._scene_name, ego_metadata)
 
     def _iter_box_detections_se3(self, box_detections_metadata: BoxDetectionsSE3Metadata) -> Iterator[BoxDetectionsSE3]:
-        """Yields box detections at keyframe rate (~2Hz), optionally interpolated to ~10Hz."""
+        """Yields box detections at keyframe rate (~2Hz), or interpolated at the lidar clock (~20Hz)."""
         nusc = self._get_or_load_nusc()
         scene = nusc.get("scene", self._scene_token)
 
@@ -422,9 +418,9 @@ class NuScenesLogParser(BaseLogParser):
                 yield extract_nuscenes_box_detections(nusc, sample, box_detections_metadata)
                 sample_token = sample["next"]
         else:
-            # 10Hz: yield keyframe annotations at keyframes, interpolated detections between
+            # Interpolated: yield at every lidar sweep (~20Hz), interpolating between keyframes.
+            # The deferred sync table will downsample to the desired iteration rate.
             keyframe_samples = collect_keyframe_samples(nusc, scene)
-            keyframe_timestamps = [s["timestamp"] for s in keyframe_samples]
             keyframe_detections: Dict[str, BoxDetectionsSE3] = {}
             for sample in keyframe_samples:
                 keyframe_detections[sample["token"]] = extract_nuscenes_box_detections(
@@ -432,12 +428,17 @@ class NuScenesLogParser(BaseLogParser):
                 )
 
             lidar_timeline = collect_lidar_sweep_timeline(nusc, scene)
-            selected_sweeps = select_10hz_sweeps(lidar_timeline, keyframe_timestamps)
 
-            for sweep in selected_sweeps:
+            for sweep in lidar_timeline:
                 timestamp = Timestamp.from_us(sweep["timestamp"])
-                if sweep["is_key_frame"]:
-                    yield keyframe_detections[sweep["sample_token"]]
+                if sweep["is_key_frame"] and sweep["sample_token"] in keyframe_detections:
+                    # Re-stamp keyframe detections to the lidar sweep timestamp for consistency
+                    kf_dets = keyframe_detections[sweep["sample_token"]]
+                    yield BoxDetectionsSE3(
+                        box_detections=kf_dets.box_detections,
+                        timestamp=timestamp,
+                        metadata=kf_dets.metadata,
+                    )
                 else:
                     prev_kf, next_kf = find_surrounding_keyframes(sweep["timestamp"], keyframe_samples)
                     if prev_kf is not None and next_kf is not None:
@@ -450,7 +451,12 @@ class NuScenesLogParser(BaseLogParser):
                             timestamp,
                         )
                     elif prev_kf is not None:
-                        yield keyframe_detections[prev_kf["token"]]
+                        kf_dets = keyframe_detections[prev_kf["token"]]
+                        yield BoxDetectionsSE3(
+                            box_detections=kf_dets.box_detections,
+                            timestamp=timestamp,
+                            metadata=kf_dets.metadata,
+                        )
                     else:
                         yield BoxDetectionsSE3(box_detections=[], timestamp=timestamp, metadata=box_detections_metadata)
 
@@ -460,7 +466,14 @@ class NuScenesLogParser(BaseLogParser):
         modality_metadata: PinholeCameraMetadata,
         pinhole_cameras_metadata: Dict[CameraID, PinholeCameraMetadata],
     ) -> Iterator[ParsedCamera]:
-        """Yields pinhole camera observations for a specific camera at native rate (~12Hz)."""
+        """Yields pinhole camera observations for a specific camera at native rate (~12Hz).
+
+        In interpolated mode, camera poses are computed by SLERP/LERP interpolation of the
+        lidar-derived ego pose timeline (~20Hz) to the exact camera capture timestamp. This
+        produces smoother poses and reduces lidar-to-camera projection misalignment.
+
+        In keyframe mode, the discrete ego pose from the camera's own ego_pose_token is used.
+        """
         target_camera_channel = modality_metadata.camera_name
 
         nusc = self._get_or_load_nusc()
@@ -468,12 +481,21 @@ class NuScenesLogParser(BaseLogParser):
         camera_timelines = collect_camera_timelines(nusc, scene)
         timeline = camera_timelines.get(target_camera_channel, [])
 
-        for cam_data in timeline:
-            parsed_camera = extract_cameras_from_timeline(
-                nusc, cam_data, camera_type, self._nuscenes_data_root, pinhole_cameras_metadata
-            )
-            if parsed_camera is not None:
-                yield parsed_camera
+        if self._is_interpolated:
+            ego_pose_timeline = collect_ego_pose_timeline(nusc, scene)
+            for cam_data in timeline:
+                parsed_camera = _extract_camera_with_interpolated_pose(
+                    cam_data, camera_type, self._nuscenes_data_root, pinhole_cameras_metadata, ego_pose_timeline
+                )
+                if parsed_camera is not None:
+                    yield parsed_camera
+        else:
+            for cam_data in timeline:
+                parsed_camera = extract_cameras_from_timeline(
+                    nusc, cam_data, camera_type, self._nuscenes_data_root, pinhole_cameras_metadata
+                )
+                if parsed_camera is not None:
+                    yield parsed_camera
 
     def _iter_lidars(self, lidar_metadata: LidarMergedMetadata) -> Iterator[ParsedLidar]:
         """Yields all lidar sweeps at native rate (~20Hz)."""

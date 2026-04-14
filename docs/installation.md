@@ -8,7 +8,7 @@ pip install py123d
 or as editable pip package with
 ```bash
 mkdir -p $HOME/py123d_workspace; cd $HOME/py123d_workspace # Optional
-git clone git@github.com:autonomousvision/py123d.git
+git clone git@github.com:kesai-labs/py123d.git
 cd py123d
 pip install -e .
 ```
