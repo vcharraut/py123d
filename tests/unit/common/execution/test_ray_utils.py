@@ -197,12 +197,13 @@ class TestRayMapItems:
 class TestRayMap:
     @pytest.fixture(autouse=True)
     def _ray_per_test(self):
-        """Re-initialize Ray per test because ray_map shuts it down on error."""
+        """Re-initialize Ray when needed; ray_map shuts it down on error."""
         if not ray.is_initialized():
             ray.init(num_cpus=2, log_to_driver=False)
         yield
-        if ray.is_initialized():
-            ray.shutdown()
+        # No teardown: leave Ray running so the next test reuses it. The
+        # happy-path test leaves Ray up; error-path tests shut it down via
+        # ray_map's error handler, and this fixture re-inits on the next test.
 
     def test_successful_map(self):
         """Happy-path map with _double."""
