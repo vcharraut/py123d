@@ -100,8 +100,9 @@ where = ["src"]
 py123d = ["py.typed", "**/*.yaml", "**/*.yml", "**/*.proto", "**/*.xodr.gz"]
 
 [project.urls]
-"Homepage" = "https://github.com/autonomousvision/py123d"
-"Bug Tracker" = "https://github.com/autonomousvision/py123d/issues"
+"Homepage" = "https://github.com/kesai-labs/py123d"
+"Bug Tracker" = "https://github.com/kesai-labs/py123d/issues"
+"Documentation" = "https://kesai.eu/py123d/"
 
 
 [tool.ruff]

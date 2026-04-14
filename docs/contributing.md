@@ -7,7 +7,7 @@ Any contributions to 123D are welcome! This guide both serves as internal tutori
 ### 1. Clone the Repository
 
 ```sh
-git clone git@github.com:autonomousvision/py123d.git
+git clone git@github.com:kesai-labs/py123d.git
 cd py123d
 ```
 
