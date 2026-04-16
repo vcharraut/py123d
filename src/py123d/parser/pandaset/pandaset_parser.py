@@ -43,6 +43,7 @@ from py123d.parser.pandaset.utils.pandaset_constants import (
     PANDASET_SPLITS,
 )
 from py123d.parser.pandaset.utils.pandaset_utils import (
+    compute_global_main_lidar_from_camera,
     extrinsic_to_imu,
     global_main_lidar_to_global_imu,
     pandaset_pose_dict_to_pose_se3,
@@ -142,7 +143,6 @@ class PandasetLogParser(BaseLogParser):
         # Read files from pandaset
         lidar_timestamps_s = read_json(source_log_path / "meta" / "timestamps.json")
 
-        lidar_poses: List[Dict[str, Dict[str, float]]] = read_json(source_log_path / "lidar" / "poses.json")
         camera_poses: Dict[str, List[Dict[str, Dict[str, float]]]] = {
             camera_name: read_json(source_log_path / "camera" / camera_name / "poses.json")
             for camera_name in PANDASET_CAMERA_MAPPING.keys()
@@ -155,9 +155,9 @@ class PandasetLogParser(BaseLogParser):
         for iteration, timestep_s in enumerate(lidar_timestamps_s):
             timestamp = Timestamp.from_s(timestep_s)
             ego_state = _extract_pandaset_sensor_ego_state(
-                lidar_pose=lidar_poses[iteration],
+                front_camera_pose=camera_poses["front_camera"][iteration],
                 ego_metadata=ego_state_se3_metadata,
-                timestamp=timestamp,
+                timestamp=Timestamp.from_s(camera_timestamps_s["front_camera"][iteration]),
             )
             box_detections = _extract_pandaset_box_detections(
                 source_log_path, iteration, timestamp, box_detections_se3_metadata
@@ -198,6 +198,7 @@ def _get_pandaset_camera_metadata(source_log_path: Path) -> Optional[Dict[Camera
         assert intrinsics_file.exists(), f"Camera intrinsics file {intrinsics_file} does not exist."
 
         intrinsics_data = read_json(intrinsics_file)
+
         camera_metadata[camera_type] = PinholeCameraMetadata(
             camera_name=camera_name,
             camera_id=camera_type,
@@ -218,12 +219,24 @@ def _get_pandaset_camera_metadata(source_log_path: Path) -> Optional[Dict[Camera
 
 
 def _extract_pandaset_sensor_ego_state(
-    lidar_pose: Dict[str, Dict[str, float]],
+    front_camera_pose: Dict[str, Dict[str, float]],
     ego_metadata: EgoStateSE3Metadata,
     timestamp: Timestamp,
 ) -> EgoStateSE3:
-    """Extracts the ego state from PandaSet lidar pose data."""
-    imu_se3 = global_main_lidar_to_global_imu(pandaset_pose_dict_to_pose_se3(lidar_pose))
+    """Extracts the ego state from PandaSet front camera pose data.
+
+    NOTE @DanielDauner: The lidar poses were not reliable in general and are inconsistant across logs.
+    We use the same strategy as Neurad studio and use the front camera as reference ego pose.
+    https://github.com/georghess/neurad-studio/blob/main/nerfstudio/data/dataparsers/pandaset_dataparser.py#L217-L218
+
+    PandaSet lidar poses are unreliable, so the lidar-to-world transform is derived
+    from the front camera pose and its static extrinsic calibration.
+    """
+    global_lidar = compute_global_main_lidar_from_camera(
+        camera_pose=pandaset_pose_dict_to_pose_se3(front_camera_pose),
+        camera_extrinsic=PANDASET_CAMERA_EXTRINSICS["front_camera"],
+    )
+    imu_se3 = global_main_lidar_to_global_imu(global_lidar)
 
     return EgoStateSE3.from_imu(
         imu_se3=imu_se3,
