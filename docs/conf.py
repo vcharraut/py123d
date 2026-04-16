@@ -20,7 +20,7 @@ class PublicDataAttrsNoEnum(PublicDataAttrs):
 project = "py123d"
 copyright = "2026"
 author = "DanielDauner"
-release = "v0.2.0"
+release = "v0.2.1"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
