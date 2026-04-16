@@ -133,10 +133,10 @@ class TestRayExecutorIsolated:
         executor = RayExecutor(threads_per_node=2, output_dir=None)
         assert executor._log_dir is None
 
-    def test_debug_mode(self, _reset_ray):
-        """debug_mode=True sets _local_mode to True."""
-        executor = RayExecutor(threads_per_node=2, debug_mode=True)
-        assert executor._local_mode is True
+    def test_default_log_to_driver(self, _reset_ray):
+        """Default log_to_driver is True."""
+        executor = RayExecutor(threads_per_node=2)
+        assert executor._log_to_driver is True
 
 
 # ---------------------------------------------------------------------------

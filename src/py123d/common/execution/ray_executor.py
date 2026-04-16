@@ -25,7 +25,6 @@ logging.getLogger("botocore").setLevel(logging.WARNING)
 def initialize_ray(
     master_node_ip: Optional[str] = None,
     threads_per_node: Optional[int] = None,
-    local_mode: bool = False,
     log_to_driver: bool = True,
     use_distributed: bool = False,
 ) -> ExecutorResources:
@@ -38,8 +37,6 @@ def initialize_ray(
     :param threads_per_node: Number of threads to use per node.
     :param log_to_driver: If true, the output from all of the worker
             processes on all nodes will be directed to the driver.
-    :param local_mode: If true, the code will be executed serially. This
-            is useful for debugging.
     :param use_distributed: If true, and the env vars are available,
             ray will launch in distributed mode
     :return: created ExecutorResources.
@@ -65,7 +62,7 @@ def initialize_ray(
     if master_node_ip and use_distributed:
         # Connect to ray remotely to node ip
         logger.info(f"Connecting to cluster at: {master_node_ip}!")
-        ray.init(address=f"ray://{master_node_ip}:10001", local_mode=local_mode, log_to_driver=log_to_driver)
+        ray.init(address=f"ray://{master_node_ip}:10001", log_to_driver=log_to_driver)
         number_of_nodes = 1
     elif env_var_master_node_ip in os.environ and use_distributed:
         # In this way, we started ray on the current machine which generated password and master node ip:
@@ -80,7 +77,6 @@ def initialize_ray(
             _node_ip_address=master_node_ip,
             _redis_password=redis_password,
             log_to_driver=log_to_driver,
-            local_mode=local_mode,
         )
     else:
         # In this case, we will just start ray directly from this script
@@ -89,7 +85,6 @@ def initialize_ray(
         ray.init(
             num_cpus=number_of_cpus_per_node,
             dashboard_host="0.0.0.0",
-            local_mode=local_mode,
             log_to_driver=log_to_driver,
         )
 
@@ -109,7 +104,6 @@ class RayExecutor(Executor):
         self,
         master_node_ip: Optional[str] = None,
         threads_per_node: Optional[int] = None,
-        debug_mode: bool = False,
         log_to_driver: bool = True,
         output_dir: Optional[Union[str, Path]] = None,
         logs_subdir: Optional[str] = "logs",
@@ -119,8 +113,6 @@ class RayExecutor(Executor):
         Initialize ray executor.
         :param master_node_ip: if available, ray will connect to remote cluster.
         :param threads_per_node: Number of threads to use per node.
-        :param debug_mode: If true, the code will be executed serially. This
-            is useful for debugging.
         :param log_to_driver: If true, the output from all of the worker
                 processes on all nodes will be directed to the driver.
         :param output_dir: Experiment output directory.
@@ -129,7 +121,6 @@ class RayExecutor(Executor):
         """
         self._master_node_ip = master_node_ip
         self._threads_per_node = threads_per_node
-        self._local_mode = debug_mode
         self._log_to_driver = log_to_driver
         self._log_dir: Optional[Path] = Path(output_dir) / (logs_subdir or "") if output_dir is not None else None
         self._use_distributed = use_distributed
@@ -148,7 +139,6 @@ class RayExecutor(Executor):
         return initialize_ray(
             master_node_ip=self._master_node_ip,
             threads_per_node=self._threads_per_node,
-            local_mode=self._local_mode,
             log_to_driver=self._log_to_driver,
             use_distributed=self._use_distributed,
         )
