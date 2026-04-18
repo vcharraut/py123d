@@ -1,4 +1,4 @@
-"""Download script for the NVIDIA PhysicalAI-Autonomous-Vehicles-NCore dataset.
+"""Download utilities for the NVIDIA PhysicalAI-Autonomous-Vehicles-NCore dataset.
 
 The NCore dataset is gated on Hugging Face. Access requires a HF account that has
 accepted the NVIDIA AV dataset license agreement, plus a token supplied via the
@@ -7,13 +7,17 @@ accepted the NVIDIA AV dataset license agreement, plus a token supplied via the
 Dataset: https://huggingface.co/datasets/nvidia/PhysicalAI-Autonomous-Vehicles-NCore
 Devkit:  https://github.com/NVIDIA/ncore
 
-Each clip on disk has the following layout (one UUID-named subdirectory per clip)::
+Per-clip on-disk layout (one UUID-named subdirectory under ``clips/``)::
 
     clips/{clip_id}/
-    ├── pai_{clip_id}.json                                        (sequence metadata)
+    ├── pai_{clip_id}.json                                        (sequence manifest)
     ├── pai_{clip_id}.ncore4.zarr.itar                            (poses, intrinsics, cuboids)
     ├── pai_{clip_id}.ncore4-lidar_top_360fov.zarr.itar           (~1.0 GB)
     └── pai_{clip_id}.ncore4-camera_{name}.zarr.itar              (~150 MB x 7 cameras)
+
+This module doubles as (a) the ``py123d-ncore-download`` CLI and (b) a reusable library
+that :class:`~py123d.parser.ncore.ncore_parser.NCoreParser` uses to stream clips into a
+temp directory during conversion.
 """
 
 from __future__ import annotations
@@ -58,8 +62,19 @@ def _require_hf_hub():
     return HfApi, snapshot_download
 
 
-def _list_all_clip_ids(token: Optional[str], revision: str) -> List[str]:
-    """Returns sorted list of clip UUIDs present under ``clips/`` in the repo."""
+def resolve_hf_token(cli_token: Optional[str] = None) -> Optional[str]:
+    """Resolve the HuggingFace token from (in order): explicit arg, ``HF_TOKEN``, ``HUGGINGFACE_HUB_TOKEN``."""
+    return cli_token or os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+
+
+def list_all_clip_ids(token: Optional[str] = None, revision: str = "main") -> List[str]:
+    """List all clip UUIDs present under ``clips/`` in the repo.
+
+    :param token: HuggingFace access token (optional for public listings, required for gated
+        repos — use :func:`resolve_hf_token` for the standard fallback chain).
+    :param revision: Dataset branch/tag/commit.
+    :return: Sorted list of clip UUIDs.
+    """
     HfApi, _ = _require_hf_hub()
     api = HfApi(token=token)
     entries = api.list_repo_tree(
@@ -69,8 +84,95 @@ def _list_all_clip_ids(token: Optional[str], revision: str) -> List[str]:
         revision=revision,
         recursive=False,
     )
-    clip_ids = sorted(Path(e.path).name for e in entries if e.path.startswith("clips/"))
-    return clip_ids
+    return sorted(Path(e.path).name for e in entries if e.path.startswith("clips/"))
+
+
+def build_clip_allow_patterns(
+    clip_ids: Sequence[str],
+    modality: str = "all",
+    cameras: Optional[Sequence[str]] = None,
+) -> List[str]:
+    """Build ``allow_patterns`` for ``snapshot_download`` that cover the given clips+modalities.
+
+    Selection logic:
+
+    - ``metadata``: always include ``pai_{id}.json`` + the default component store
+      (poses, intrinsics, cuboids).
+    - ``lidar``:    also include the top lidar ``.zarr.itar``.
+    - ``cameras``:  also include one ``.zarr.itar`` per requested camera (or all 7 if
+      ``cameras`` is ``None``).
+    - ``all``:      every file under the clip directory.
+    """
+    patterns: List[str] = []
+    for clip_id in clip_ids:
+        base = f"clips/{clip_id}"
+        if modality == "all":
+            patterns.append(f"{base}/*")
+            continue
+
+        # metadata is always included for non-"all" modalities so the sequence remains loadable.
+        patterns.append(f"{base}/pai_{clip_id}.json")
+        patterns.append(f"{base}/pai_{clip_id}.ncore4.zarr.itar")
+
+        if modality == "lidar":
+            patterns.append(f"{base}/pai_{clip_id}.ncore4-lidar_top_360fov.zarr.itar")
+        elif modality == "cameras":
+            target_cams = cameras if cameras else CAMERA_IDS
+            for cam in target_cams:
+                patterns.append(f"{base}/pai_{clip_id}.ncore4-{cam}.zarr.itar")
+
+    return patterns
+
+
+def download_clip(
+    clip_id: str,
+    output_dir: Path,
+    modality: str = "all",
+    cameras: Optional[Sequence[str]] = None,
+    hf_token: Optional[str] = None,
+    revision: str = "main",
+    max_workers: int = 4,
+) -> Path:
+    """Download a single clip into ``output_dir`` and return the path to its sequence manifest.
+
+    The clip is written to ``{output_dir}/clips/{clip_id}/``. Only the per-clip files are
+    fetched (no repo-level README etc.) — useful for per-clip streaming during conversion.
+
+    :param clip_id: Clip UUID.
+    :param output_dir: Destination directory (typically a ``tempfile.TemporaryDirectory``).
+    :param modality: Which modalities to pull for this clip. See :func:`build_clip_allow_patterns`.
+    :param cameras: Camera IDs to pull when ``modality="cameras"``.
+    :param hf_token: HuggingFace access token.
+    :param revision: HF dataset revision.
+    :param max_workers: Parallel download workers (per clip).
+    :return: Path to ``{output_dir}/clips/{clip_id}/pai_{clip_id}.json``.
+    """
+    _, snapshot_download = _require_hf_hub()
+    allow_patterns = build_clip_allow_patterns([clip_id], modality=modality, cameras=cameras)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    snapshot_download(
+        repo_id=NCORE_REPO_ID,
+        repo_type=NCORE_REPO_TYPE,
+        revision=revision,
+        local_dir=str(output_dir),
+        allow_patterns=allow_patterns,
+        token=hf_token,
+        max_workers=max_workers,
+    )
+    manifest_path = output_dir / "clips" / clip_id / f"pai_{clip_id}.json"
+    if not manifest_path.exists():
+        raise RuntimeError(
+            f"Clip {clip_id} download completed but manifest {manifest_path} is missing. "
+            "The clip may not exist on the requested revision, or the HF token lacks access."
+        )
+    return manifest_path
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# CLI
+# ----------------------------------------------------------------------------------------------------------------------
 
 
 def _resolve_clip_selection(
@@ -81,14 +183,14 @@ def _resolve_clip_selection(
     token: Optional[str],
     revision: str,
 ) -> List[str]:
-    """Decides which clip UUIDs to download.
+    """Decide which clip UUIDs the CLI should download.
 
-    Precedence: explicit --clip-ids > --num-clips > full dataset.
+    Precedence: explicit ``--clip-ids`` > ``--num-clips`` > full dataset.
     """
     if requested_ids:
         selected = list(requested_ids)
     else:
-        all_ids = _list_all_clip_ids(token=token, revision=revision)
+        all_ids = list_all_clip_ids(token=token, revision=revision)
         logger.info("Found %d clips in %s@%s", len(all_ids), NCORE_REPO_ID, revision)
         if num_clips is None or num_clips >= len(all_ids):
             selected = all_ids
@@ -98,49 +200,6 @@ def _resolve_clip_selection(
         else:
             selected = all_ids[:num_clips]
     return selected
-
-
-def _build_allow_patterns(
-    clip_ids: Sequence[str],
-    modality: str,
-    cameras: Optional[Sequence[str]],
-    include_repo_meta: bool,
-) -> List[str]:
-    """Builds fine-grained ``allow_patterns`` for ``snapshot_download``.
-
-    Selection logic:
-    - ``metadata``: always include ``pai_{id}.json`` + default component store (poses/intrinsics/cuboids).
-    - ``lidar``:    add the top lidar zarr.itar.
-    - ``cameras``:  add zarr.itar for each requested camera (or all cameras if unset).
-    - ``all``:      every file under the clip dir.
-    """
-    patterns: List[str] = []
-    if include_repo_meta:
-        patterns.extend(REPO_META_FILES)
-
-    for clip_id in clip_ids:
-        base = f"clips/{clip_id}"
-        if modality == "all":
-            patterns.append(f"{base}/*")
-            continue
-
-        # `metadata` is always included for any non-"all" modality so the sequence is loadable.
-        patterns.append(f"{base}/pai_{clip_id}.json")
-        patterns.append(f"{base}/pai_{clip_id}.ncore4.zarr.itar")
-
-        if modality in ("lidar", "cameras"):
-            if modality == "lidar":
-                patterns.append(f"{base}/pai_{clip_id}.ncore4-lidar_top_360fov.zarr.itar")
-            else:
-                target_cams = cameras if cameras else CAMERA_IDS
-                for cam in target_cams:
-                    patterns.append(f"{base}/pai_{clip_id}.ncore4-{cam}.zarr.itar")
-
-    return patterns
-
-
-def _resolve_token(cli_token: Optional[str]) -> Optional[str]:
-    return cli_token or os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
 
 
 def _resolve_output_dir(cli_output: Optional[str]) -> Path:
@@ -271,7 +330,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         format="%(asctime)s | %(levelname)s | %(message)s",
     )
 
-    token = _resolve_token(args.hf_token)
+    token = resolve_hf_token(args.hf_token)
     if token is None:
         logger.warning(
             "No HF token provided. The NCore dataset is gated — set $HF_TOKEN or pass --hf-token "
@@ -279,7 +338,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
 
     if args.list_clips:
-        clip_ids = _list_all_clip_ids(token=token, revision=args.revision)
+        clip_ids = list_all_clip_ids(token=token, revision=args.revision)
         logger.info("Listing %d clips in %s@%s", len(clip_ids), NCORE_REPO_ID, args.revision)
         for clip_id in clip_ids:
             sys.stdout.write(f"{clip_id}\n")
@@ -300,12 +359,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         logger.error("No clips selected — nothing to download.")
         return 1
 
-    allow_patterns = _build_allow_patterns(
-        clip_ids=clip_ids,
-        modality=args.modality,
-        cameras=args.cameras,
-        include_repo_meta=not args.clips_only,
-    )
+    allow_patterns = list(REPO_META_FILES) if not args.clips_only else []
+    allow_patterns.extend(build_clip_allow_patterns(clip_ids=clip_ids, modality=args.modality, cameras=args.cameras))
 
     logger.info("Target directory: %s", output_dir)
     logger.info("Revision:         %s", args.revision)
