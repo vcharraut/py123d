@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Tuple, Union
 
@@ -113,23 +114,155 @@ class WODMotionParser(BaseDatasetParser):
     def __init__(
         self,
         splits: List[str],
-        wod_motion_data_root: Union[str, Path],
-        add_dummy_lane_groups: bool,
+        wod_motion_data_root: Optional[Union[str, Path]] = None,
+        add_dummy_lane_groups: bool = False,
+        stream_enabled: bool = False,
+        stream_shard_indices: Optional[Dict[str, List[int]]] = None,
+        stream_num_shards: Optional[int] = None,
+        stream_random: bool = False,
+        stream_seed: int = 0,
+        stream_version: str = "1_3_0",
+        stream_credentials_file: Optional[Union[str, Path]] = None,
+        stream_temp_dir: Optional[Union[str, Path]] = None,
+        stream_max_workers: int = 4,
     ) -> None:
-        assert wod_motion_data_root is not None, "The variable `wod_motion_data_root` must be provided."
-        assert Path(wod_motion_data_root).exists(), (
-            f"The provided `wod_motion_data_root` path {wod_motion_data_root} does not exist."
-        )
+        """Initialize the WOD Motion parser.
+
+        :param splits: Dataset splits to process (subset of :data:`WOD_MOTION_AVAILABLE_SPLITS`).
+        :param wod_motion_data_root: Root directory of the downloaded WOMD dataset (contains
+            ``training/``, ``validation/``, ``testing/`` subdirectories). Required for local
+            mode; can be ``None`` when ``stream_enabled=True``.
+        :param add_dummy_lane_groups: Whether to add dummy lane groups to the parsed maps.
+        :param stream_enabled: If ``True``, fetch shards from GCS into a managed temp directory
+            at parser construction time and delete the temp dir when the parser is garbage
+            collected. No local ``wod_motion_data_root`` is required in this mode.
+        :param stream_shard_indices: Per-split exact shard indices to fetch, e.g.
+            ``{"training": [0, 1, 2], "validation": [0]}``. Takes precedence over
+            ``stream_num_shards`` for any split it covers.
+        :param stream_num_shards: If set, download the first N shards (or N random shards
+            when ``stream_random=True``) per split. Applied to any split not covered by
+            ``stream_shard_indices``.
+        :param stream_random: Randomize ``stream_num_shards`` selection.
+        :param stream_seed: RNG seed used when ``stream_random=True``.
+        :param stream_version: WOMD version string (e.g. ``"1_3_0"``), mapped to
+            bucket ``waymo_open_dataset_motion_v_<version>``.
+        :param stream_credentials_file: Optional service-account JSON for GCS auth.
+            Defaults to Application Default Credentials.
+        :param stream_temp_dir: Parent directory for the managed temp folder. Defaults
+            to the system temp location.
+        :param stream_max_workers: Parallel GCS download threads.
+        """
         for split in splits:
             assert split in WOD_MOTION_AVAILABLE_SPLITS, (
                 f"Split {split} is not available. Available splits: {WOD_MOTION_AVAILABLE_SPLITS}"
             )
 
         self._splits: List[str] = splits
-        self._wod_motion_data_root: Path = Path(wod_motion_data_root)
         self._add_dummy_lane_groups: bool = add_dummy_lane_groups
+        self._stream_enabled: bool = stream_enabled
+        self._stream_temp_dir_handle: Optional[tempfile.TemporaryDirectory] = None
+
+        if stream_enabled:
+            self._wod_motion_data_root = self._stream_shards(
+                shard_indices=stream_shard_indices,
+                num_shards=stream_num_shards,
+                sample_random=stream_random,
+                seed=stream_seed,
+                version=stream_version,
+                credentials_file=Path(stream_credentials_file) if stream_credentials_file is not None else None,
+                temp_dir_parent=Path(stream_temp_dir) if stream_temp_dir is not None else None,
+                max_workers=stream_max_workers,
+            )
+        else:
+            assert wod_motion_data_root is not None, (
+                "`wod_motion_data_root` must be provided when `stream_enabled=False`."
+            )
+            assert Path(wod_motion_data_root).exists(), (
+                f"The provided `wod_motion_data_root` path {wod_motion_data_root} does not exist."
+            )
+            self._wod_motion_data_root = Path(wod_motion_data_root)
 
         self._split_tf_record_pairs: List[Tuple[str, Path, str]] = self._collect_split_tf_record_pairs()
+
+    def _stream_shards(
+        self,
+        shard_indices: Optional[Dict[str, List[int]]],
+        num_shards: Optional[int],
+        sample_random: bool,
+        seed: int,
+        version: str,
+        credentials_file: Optional[Path],
+        temp_dir_parent: Optional[Path],
+        max_workers: int,
+    ) -> Path:
+        """Download selected scenario shards from GCS into a managed temp directory.
+
+        The returned path mimics the on-disk layout a locally-downloaded WOMD dataset has
+        (``<root>/{training,validation,testing}/*.tfrecord-*``), so the rest of the parser
+        is unchanged.
+        """
+        from py123d.parser.wod.motion_download import (
+            download_shards,
+            list_split_shards,
+            resolve_gcs_client,
+            select_shards,
+        )
+
+        split_name_mapping: Dict[str, str] = {
+            "wod-motion_train": "training",
+            "wod-motion_val": "validation",
+            "wod-motion_test": "testing",
+        }
+
+        if temp_dir_parent is not None:
+            temp_dir_parent.mkdir(parents=True, exist_ok=True)
+        self._stream_temp_dir_handle = tempfile.TemporaryDirectory(
+            prefix="py123d-womd-",
+            dir=str(temp_dir_parent) if temp_dir_parent is not None else None,
+        )
+        temp_root = Path(self._stream_temp_dir_handle.name)
+        logger.info("WOMD streaming temp dir: %s", temp_root)
+
+        client = resolve_gcs_client(credentials_file)
+
+        blob_names: List[str] = []
+        for split in self._splits:
+            gcs_split = split_name_mapping[split]
+            per_split_indices = shard_indices.get(gcs_split) if shard_indices else None
+            all_shards = list_split_shards(client, section="scenario", split=gcs_split, version=version)
+            selected = select_shards(
+                all_shards,
+                shard_indices=per_split_indices,
+                num_shards=num_shards if per_split_indices is None else None,
+                sample_random=sample_random,
+                seed=seed,
+            )
+            logger.info(
+                "WOMD streaming: selected %d / %d shards for split %s",
+                len(selected),
+                len(all_shards),
+                gcs_split,
+            )
+            blob_names.extend(selected)
+
+        download_shards(
+            client=client,
+            blob_names=blob_names,
+            output_dir=temp_root,
+            version=version,
+            max_workers=max_workers,
+            overwrite=False,
+        )
+        return temp_root
+
+    def __del__(self) -> None:
+        """Clean up the streaming temp directory when the parser is garbage collected."""
+        handle = getattr(self, "_stream_temp_dir_handle", None)
+        if handle is not None:
+            try:
+                handle.cleanup()
+            except Exception:
+                pass
 
     def _collect_split_tf_record_pairs(self) -> List[Tuple[str, Path, str]]:
         """Helper to collect the pairings of the split names and the corresponding tf record file."""

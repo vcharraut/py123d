@@ -6,6 +6,24 @@ parser:
   wod_motion_data_root: ${dataset_paths.wod_motion_data_root}
   add_dummy_lane_groups: false
 
+  # Streaming mode — download selected scenario shards from Google Cloud Storage into a temp
+  # directory at parser construction time. The temp dir is cleaned up when the parser is
+  # garbage collected. Requires `pip install py123d[womd-download]`.
+  #
+  # When `stream_enabled: true`:
+  #   - `wod_motion_data_root` is ignored
+  #   - shards land under a tempfile.TemporaryDirectory mimicking the local layout
+  #   - `stream_shard_indices` (per-split) takes precedence over `stream_num_shards`
+  stream_enabled: false
+  stream_shard_indices: null     # e.g. {training: [0, 1, 2], validation: [0]}
+  stream_num_shards: null        # first N per split, or N random if stream_random=true
+  stream_random: false
+  stream_seed: 0
+  stream_version: "1_3_0"
+  stream_credentials_file: null  # service-account JSON; null → Application Default Credentials
+  stream_temp_dir: null          # null → system temp
+  stream_max_workers: 4
+
 log_writer_config:
   _target_: py123d.api.scene.arrow.utils.log_writer_config.LogWriterConfig
   _convert_: 'all'

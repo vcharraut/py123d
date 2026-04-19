@@ -55,6 +55,7 @@ dependencies = [
 py123d-viser = "py123d.script.run_viser:main"
 py123d-conversion = "py123d.script.run_conversion:main"
 py123d-ncore-download = "py123d.parser.ncore.download:main"
+py123d-womd-download = "py123d.parser.wod.motion_download:main"
 
 [project.optional-dependencies]
 dev = [
@@ -89,6 +90,9 @@ nuscenes = [
 waymo = [
     "tensorflow-cpu>=2.13",
     "protobuf>=6.31",
+]
+womd-download = [
+    "google-cloud-storage>=2.14",
 ]
 ffmpeg = [
     "imageio[ffmpeg]",
