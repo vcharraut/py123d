@@ -5,6 +5,7 @@ parser:
   splits: ["wod-motion_val", "wod-motion_train", "wod-motion_test"]
   wod_motion_data_root: ${dataset_paths.wod_motion_data_root}
   add_dummy_lane_groups: false
+  skip_maps: false        # when true, get_map_parsers() returns [] — saves disk when tight
 
   # Streaming mode — download selected scenario shards from Google Cloud Storage into a temp
   # directory at parser construction time. The temp dir is cleaned up when the parser is
