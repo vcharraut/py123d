@@ -54,6 +54,7 @@ dependencies = [
 [project.scripts]
 py123d-viser = "py123d.script.run_viser:main"
 py123d-conversion = "py123d.script.run_conversion:main"
+py123d-ncore-download = "py123d.parser.ncore.download:main"
 
 [project.optional-dependencies]
 dev = [
@@ -91,6 +92,10 @@ waymo = [
 ]
 ffmpeg = [
     "imageio[ffmpeg]",
+]
+ncore = [
+    "huggingface_hub>=0.23",
+    "nvidia-ncore",
 ]
 
 [tool.setuptools.packages.find]

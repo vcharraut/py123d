@@ -399,6 +399,7 @@ def _get_ftheta_camera_metadatas(data_root: Path, clip_id: str, chunk: int) -> D
         except KeyError:
             continue
 
+        # PAI calibration only defines 5 coefficients; pad with a trailing zero to match the 6-coeff FTheta representation.
         fw_poly = np.array(
             [
                 cam_intr["fw_poly_0"],
@@ -406,6 +407,7 @@ def _get_ftheta_camera_metadatas(data_root: Path, clip_id: str, chunk: int) -> D
                 cam_intr["fw_poly_2"],
                 cam_intr["fw_poly_3"],
                 cam_intr["fw_poly_4"],
+                0.0,
             ],
             dtype=np.float64,
         )
@@ -416,6 +418,7 @@ def _get_ftheta_camera_metadatas(data_root: Path, clip_id: str, chunk: int) -> D
                 cam_intr["bw_poly_2"],
                 cam_intr["bw_poly_3"],
                 cam_intr["bw_poly_4"],
+                0.0,
             ],
             dtype=np.float64,
         )
