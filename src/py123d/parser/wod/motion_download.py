@@ -58,7 +58,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 WOMD_BUCKET_PREFIX = "waymo_open_dataset_motion_v_"
-WOMD_DEFAULT_VERSION = "1_3_0"
+# Canonical form uses dots ("1.3.0") so Hydra CLI overrides don't get reparsed as the
+# numeric literal 130 (Python treats ``1_3_0`` as an int). Internally we normalize
+# dots to underscores when building the bucket name.
+WOMD_DEFAULT_VERSION = "1.3.0"
 
 SCENARIO_SPLITS: Tuple[str, ...] = (
     "training",
@@ -112,14 +115,20 @@ def resolve_gcs_client(credentials_file: Optional[Path] = None) -> "storage.Clie
         logger.debug("Using service-account credentials from %s", credentials_path)
         return storage.Client.from_service_account_json(str(credentials_path))
 
+    # Use google.auth.default() directly so we can handle the common case where the user
+    # ran `gcloud auth application-default login` but never set a quota project —
+    # storage.Client() would raise in that case even though the credentials are valid.
+    # WOMD reads are public so no real project is needed; we pass a placeholder.
     try:
-        client = storage.Client()
-        logger.debug("Using Application Default Credentials (project=%s)", client.project)
-        return client
-    except Exception as exc:  # DefaultCredentialsError etc.
+        import google.auth
+
+        credentials, project = google.auth.default()
+        logger.debug("Using Application Default Credentials (project=%s)", project)
+        return storage.Client(credentials=credentials, project=project or "py123d-womd")
+    except Exception as exc:  # DefaultCredentialsError, etc.
         logger.warning(
             "Could not create authenticated GCS client (%s); falling back to anonymous client. "
-            "Downloads will work if the target bucket is publicly readable.",
+            "If you expected authenticated access, run: gcloud auth application-default login",
             exc,
         )
         return storage.Client.create_anonymous_client()
@@ -131,7 +140,10 @@ def resolve_gcs_client(credentials_file: Optional[Path] = None) -> "storage.Clie
 
 
 def _bucket_name(version: str) -> str:
-    return f"{WOMD_BUCKET_PREFIX}{version}"
+    # Accept both "1.3.0" (canonical / recommended) and "1_3_0" — normalize to the
+    # underscore form used in the GCS bucket name.
+    normalized = str(version).replace(".", "_")
+    return f"{WOMD_BUCKET_PREFIX}{normalized}"
 
 
 def _split_prefix(section: str, split: str) -> str:

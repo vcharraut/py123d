@@ -121,7 +121,7 @@ class WODMotionParser(BaseDatasetParser):
         stream_num_shards: Optional[int] = None,
         stream_random: bool = False,
         stream_seed: int = 0,
-        stream_version: str = "1_3_0",
+        stream_version: str = "1.3.0",
         stream_credentials_file: Optional[Union[str, Path]] = None,
         stream_temp_dir: Optional[Union[str, Path]] = None,
         stream_max_workers: int = 4,
@@ -144,8 +144,10 @@ class WODMotionParser(BaseDatasetParser):
             ``stream_shard_indices``.
         :param stream_random: Randomize ``stream_num_shards`` selection.
         :param stream_seed: RNG seed used when ``stream_random=True``.
-        :param stream_version: WOMD version string (e.g. ``"1_3_0"``), mapped to
-            bucket ``waymo_open_dataset_motion_v_<version>``.
+        :param stream_version: WOMD version string (e.g. ``"1.3.0"``), mapped to
+            bucket ``waymo_open_dataset_motion_v_<version>`` with dots normalized to
+            underscores. Use dot-notation so Hydra CLI overrides aren't reparsed as
+            numeric literals (``1_3_0`` is the int ``130`` in Python).
         :param stream_credentials_file: Optional service-account JSON for GCS auth.
             Defaults to Application Default Credentials.
         :param stream_temp_dir: Parent directory for the managed temp folder. Defaults

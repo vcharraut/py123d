@@ -19,7 +19,7 @@ parser:
   stream_num_shards: null        # first N per split, or N random if stream_random=true
   stream_random: false
   stream_seed: 0
-  stream_version: "1_3_0"
+  stream_version: "1.3.0"        # use dots; Hydra parses "1_3_0" as the int 130
   stream_credentials_file: null  # service-account JSON; null → Application Default Credentials
   stream_temp_dir: null          # null → system temp
   stream_max_workers: 4
