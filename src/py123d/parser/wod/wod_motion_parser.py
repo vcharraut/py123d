@@ -117,6 +117,7 @@ class WODMotionParser(BaseDatasetParser):
         wod_motion_data_root: Optional[Union[str, Path]] = None,
         add_dummy_lane_groups: bool = False,
         skip_maps: bool = False,
+        skip_logs: bool = False,
         stream_enabled: bool = False,
         stream_shard_indices: Optional[Dict[str, List[int]]] = None,
         stream_num_shards: Optional[int] = None,
@@ -137,6 +138,9 @@ class WODMotionParser(BaseDatasetParser):
         :param skip_maps: If ``True``, ``get_map_parsers()`` returns an empty list — the map
             conversion pass is skipped entirely. Useful when disk space is tight; HD-map
             Arrow files account for a nontrivial share of WOMD output size.
+        :param skip_logs: If ``True``, ``get_log_parsers()`` returns an empty list — the log
+            conversion pass is skipped entirely. Useful for running maps-only conversion
+            passes in parallel to a previously completed logs-only pass.
         :param stream_enabled: If ``True``, fetch shards from GCS into a managed temp directory
             at parser construction time and delete the temp dir when the parser is garbage
             collected. No local ``wod_motion_data_root`` is required in this mode.
@@ -166,6 +170,7 @@ class WODMotionParser(BaseDatasetParser):
         self._splits: List[str] = splits
         self._add_dummy_lane_groups: bool = add_dummy_lane_groups
         self._skip_maps: bool = skip_maps
+        self._skip_logs: bool = skip_logs
         self._stream_enabled: bool = stream_enabled
         self._stream_temp_dir_handle: Optional[tempfile.TemporaryDirectory] = None
 
@@ -309,6 +314,8 @@ class WODMotionParser(BaseDatasetParser):
 
     def get_log_parsers(self) -> List[BaseLogParser]:
         """Inherited, see superclass."""
+        if self._skip_logs:
+            return []
         return [
             WODMotionLogParser(
                 split=split,
