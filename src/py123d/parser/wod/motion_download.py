@@ -21,6 +21,18 @@ Bucket layout (default version ``1_3_0``)::
             validation/*.tfrecord-*
             testing/*.tfrecord-*
 
+GCS scenario folder ↔ 123D split name mapping (see ``WOD_MOTION_SPLIT_TO_GCS_FOLDER``):
+
+    training                ↔ wod-motion_train
+    validation              ↔ wod-motion_val
+    testing                 ↔ wod-motion_test
+    training_20s            ↔ wod-motion-20s_train
+    validation_interactive  ↔ wod-motion-interactive_val
+    testing_interactive     ↔ wod-motion-interactive_test
+
+Asymmetric availability: ``training_20s`` has no val/test counterpart, and the ``*_interactive``
+folders have no training counterpart — the parser's split registry drops those combinations.
+
 On-disk output layout under ``--output-dir``::
 
     <output_dir>/
