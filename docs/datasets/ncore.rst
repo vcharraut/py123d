@@ -102,7 +102,7 @@ The downloaded dataset has the following per-clip structure:
           ├── pai_{clip_id}.json                                    (sequence manifest)
           ├── pai_{clip_id}.ncore4.zarr.itar                        (poses, intrinsics, cuboids, masks)
           ├── pai_{clip_id}.ncore4-lidar_top_360fov.zarr.itar       (~1.0 GB)
-          └── pai_{clip_id}.ncore4-camera_{name}.zarr.itar          (~150 MB × 7 cameras)
+          └── pai_{clip_id}.ncore4-camera_{name}.zarr.itar          (~150 MB x 7 cameras)
 
 
 Installation
@@ -118,7 +118,7 @@ Install the ``ncore`` extra to pull in the NCore reader plus the HF downloader:
 Conversion
 ~~~~~~~~~~
 
-**Local mode** — clips already downloaded on disk:
+**Local mode** — clips already downloaded to ``$NCORE_DATA_ROOT`` (see the `Download`_ section above):
 
 .. code-block:: bash
 
@@ -129,13 +129,16 @@ Conversion
   py123d-conversion dataset=ncore dataset.parser.max_clips=2
 
 
-**Streaming mode** — download each clip to a temp directory at parse time and delete it
-afterwards. Handy when disk is tight or you want to convert a one-off subset without
-committing ~2.4 TB to permanent storage:
+**Streaming mode** — download each clip from Hugging Face to a temp directory at parse
+time and delete it afterwards. Useful when disk is tight or you want to convert a one-off
+subset without committing ~2.4 TB to permanent storage:
 
 .. code-block:: bash
 
+  # Authenticate once — NCore is a gated HF dataset
   export HF_TOKEN=hf_...
+
+  # Stream the first 5 clips end-to-end:
   py123d-conversion dataset=ncore \
       dataset.parser.stream_enabled=true \
       dataset.parser.max_clips=5
@@ -155,11 +158,19 @@ In streaming mode each Ray worker downloads its assigned clip into an isolated t
 directory, runs the conversion, and deletes the temp directory before moving on.
 Clip-level parallelism therefore also parallelizes downloads.
 
+.. warning::
+  Each NCore clip is ~1.2 GB (1 x LiDAR archive + 7 x camera archives). Even small
+  values of ``max_clips`` imply multi-GB of download traffic.
 
 .. note::
   The default conversion stores camera frames as JPEG-binary Arrow columns (NCore
   already stores JPEG in each frame, so no re-encoding happens) and LiDAR as
   IPC/LZ4. Override via the ``ncore.yaml`` converter config if needed.
+
+To pre-stage data outside the conversion pipeline (e.g. when you want a persistent
+local copy shared across multiple conversion runs), use the standalone CLI installed
+with ``py123d[ncore]`` — see the `Download`_ section above for ``py123d-ncore-download``
+invocations.
 
 
 Dataset Issues

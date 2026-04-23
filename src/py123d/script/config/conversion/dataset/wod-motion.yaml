@@ -24,7 +24,7 @@ parser:
 
   # Streaming mode — download selected scenario shards from Google Cloud Storage into a temp
   # directory at parser construction time. The temp dir is cleaned up when the parser is
-  # garbage collected. Requires `pip install py123d[womd-download]`.
+  # garbage collected. Requires `pip install py123d[waymo]`.
   #
   # When `stream_enabled: true`:
   #   - `wod_motion_data_root` is ignored

@@ -38,7 +38,14 @@ WAYMO_LANE_TYPE_CONVERSION: Dict[int, LaneType] = {
 
 # Perception:
 # ----------------------------------------------------------------------------------------------------------------------
-WOD_PERCEPTION_AVAILABLE_SPLITS: List[str] = ["wod-perception_train", "wod-perception_val", "wod-perception_test"]
+# Single source of truth for WOD-Perception splits. Mirrors the motion pattern and is used by
+# both the parser (local file discovery) and the downloader (GCS prefix construction).
+WOD_PERCEPTION_SPLIT_TO_GCS_FOLDER: Dict[str, str] = {
+    "wod-perception_train": "training",
+    "wod-perception_val": "validation",
+    "wod-perception_test": "testing",
+}
+WOD_PERCEPTION_AVAILABLE_SPLITS: List[str] = list(WOD_PERCEPTION_SPLIT_TO_GCS_FOLDER)
 
 # https://github.com/waymo-research/waymo-open-dataset/blob/master/src/waymo_open_dataset/dataset.proto#L50
 WOD_PERCEPTION_CAMERA_IDS: Dict[int, CameraID] = {

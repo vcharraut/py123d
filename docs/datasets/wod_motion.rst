@@ -122,6 +122,44 @@ The optional dependencies (``tensorflow-cpu`` and ``protobuf``) are only needed 
 After conversion, you may use any other ``py123d`` installation without these dependencies.
 
 
+Conversion
+~~~~~~~~~~
+
+**Local mode** — data already downloaded to ``$WOD_MOTION_DATA_ROOT``:
+
+.. code-block:: bash
+
+  py123d-conversion dataset=wod-motion
+
+**Streaming mode** — download selected scenario shards from GCS into a temp directory at
+parser construction time:
+
+.. code-block:: bash
+
+  # Stream the first shard of each default split:
+  py123d-conversion dataset=wod-motion \
+      dataset.parser.stream_enabled=true \
+      dataset.parser.stream_num_shards=1
+
+  # Stream specific shard indices (keyed by GCS folder name):
+  py123d-conversion dataset=wod-motion \
+      dataset.parser.stream_enabled=true \
+      'dataset.parser.stream_shard_indices={training: [0, 1, 2], validation: [0]}'
+
+The motion bucket is anonymously readable after license acceptance, so ADC is not strictly
+required; if available it will be used automatically.
+
+To pre-stage data outside the conversion pipeline, use the standalone CLI:
+
+.. code-block:: bash
+
+  # List shards that would be downloaded (first 3 training shards):
+  py123d-wod-download motion --splits training --num-shards 3 --list
+
+  # Download the first training shard to $WOD_MOTION_DATA_ROOT:
+  py123d-wod-download motion --splits training --num-shards 1
+
+
 Dataset Specific Issues
 ~~~~~~~~~~~~~~~~~~~~~~~
 

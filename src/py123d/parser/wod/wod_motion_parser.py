@@ -232,9 +232,10 @@ class WODMotionParser(BaseDatasetParser):
         (``<root>/{training,validation,testing}/*.tfrecord-*``), so the rest of the parser
         is unchanged.
         """
-        from py123d.parser.wod.motion_download import (
+        from py123d.parser.wod.wod_download import (
             download_shards,
-            list_split_shards,
+            list_motion_split_shards,
+            motion_spec,
             resolve_gcs_client,
             select_shards,
         )
@@ -254,7 +255,7 @@ class WODMotionParser(BaseDatasetParser):
         for split in self._splits:
             gcs_split = WOD_MOTION_SPLIT_TO_GCS_FOLDER[split]
             per_split_indices = shard_indices.get(gcs_split) if shard_indices else None
-            all_shards = list_split_shards(client, section="scenario", split=gcs_split, version=version)
+            all_shards = list_motion_split_shards(client, section="scenario", split=gcs_split, version=version)
             selected = select_shards(
                 all_shards,
                 shard_indices=per_split_indices,
@@ -271,10 +272,10 @@ class WODMotionParser(BaseDatasetParser):
             blob_names.extend(selected)
 
         download_shards(
+            spec=motion_spec(version),
             client=client,
             blob_names=blob_names,
             output_dir=temp_root,
-            version=version,
             max_workers=max_workers,
             overwrite=False,
         )

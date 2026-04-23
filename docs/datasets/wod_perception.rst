@@ -140,7 +140,7 @@ After conversion, you may use any other ``py123d`` installation without these de
 Conversion
 ~~~~~~~~~~~~
 
-You can convert the Waymo Open Dataset for Perception by running:
+**Local mode** — data already downloaded to ``$WOD_PERCEPTION_DATA_ROOT``:
 
 .. code-block:: bash
 
@@ -150,6 +150,52 @@ You can convert the Waymo Open Dataset for Perception by running:
   The conversion of WOD-Perception by default stores the camera images as jpegs and the Lidar point clouds as binary files in the logs.
   Thus, the logs need fairly large disk space. Reading from the raw TFRecord files is also supported, but requires the Waymo Open Dataset specific dependencies (see above) and might be slower.
   To change the default behavior, you need to adapt the ``wod-perception.yaml`` converter configuration.
+
+**Streaming mode** — download selected segments from GCS into a temp directory at parser
+construction time. Useful when the full ~1 TB dataset is too large for local disk and you
+only need a handful of segments for iteration:
+
+.. code-block:: bash
+
+  # Authenticate once (the perception bucket is not anonymously readable)
+  gcloud auth application-default login
+
+  # Stream the first segment of the validation split only:
+  py123d-conversion dataset=wod-perception \
+      dataset.parser.stream_enabled=true \
+      dataset.parser.stream_num_shards=1 \
+      'dataset.parser.splits=[wod-perception_val]'
+
+  # Stream specific segment indices (per GCS-folder name):
+  py123d-conversion dataset=wod-perception \
+      dataset.parser.stream_enabled=true \
+      'dataset.parser.stream_shard_indices={validation: [0, 1, 2]}'
+
+  # Keep temp files somewhere with room (HOME filesystems often have small /tmp):
+  py123d-conversion dataset=wod-perception \
+      dataset.parser.stream_enabled=true \
+      dataset.parser.stream_num_shards=1 \
+      dataset.parser.stream_temp_dir=/mnt/scratch/wod_perception_tmp
+
+.. warning::
+  Perception segments are ~1 GB each — even small values of ``stream_num_shards``
+  imply multiple GB of download traffic.
+
+.. note::
+  Unlike the motion bucket, the perception bucket requires an authenticated GCS
+  client. If neither ``gcloud auth application-default login`` nor
+  ``stream_credentials_file`` is configured, listing will fail with a 403.
+
+To pre-stage data outside the conversion pipeline (or simply preview which segments would
+be downloaded), use the standalone CLI installed with ``py123d[waymo]``:
+
+.. code-block:: bash
+
+  # List the first 3 segments of the validation split without downloading:
+  py123d-wod-download perception --splits validation --num-shards 3 --list
+
+  # Download a single training segment to $WOD_PERCEPTION_DATA_ROOT:
+  py123d-wod-download perception --splits training --num-shards 1
 
 Dataset Specific Issues
 ~~~~~~~~~~~~~~~~~~~~~~~
