@@ -17,9 +17,6 @@ parser:
     - "Town15.xodr.gz"
 
   location: null
-  interpolation_step_size: 1.0
-  connection_distance_threshold: 0.1
-  internal_only: true
 
 log_writer_config:
   _target_: py123d.api.scene.arrow.utils.log_writer_config.LogWriterConfig
