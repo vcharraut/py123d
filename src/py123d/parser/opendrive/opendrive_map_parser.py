@@ -521,12 +521,15 @@ def iter_xodr_map_objects(xodr_file: Path) -> Iterator[BaseMapObject]:
         regions.append(shapely.union_all([union] + filled))
         lifts.append(lift)
 
-    # 4. Other lane types become outline-only surfaces (not raised and not part of a dropped surface piece).
+    # 4. Other lane types become outline-only surfaces (not raised and not part of a dropped surface piece). Sidewalks
+    # and curb strips (the kerb between road edge and sidewalk) are walkways.
     dropped = shapely.union_all(dropped)
     for key, ln in lanes.items():
-        if ln["type"] in SURFACE_TYPES and key not in raised and not (ln["type"] != "sidewalk" and polygon_of(ln).representative_point().within(dropped)):
+        walkway = ln["type"] == "sidewalk" or key in curb_lanes
+        surface = ln["type"] in SURFACE_TYPES and key not in raised and not polygon_of(ln).representative_point().within(dropped)
+        if (walkway or surface) and len(ln["inner"]) > 1:
             outline = np.vstack([ln["inner"], ln["outer"][::-1], ln["inner"][:1]])
-            yield SURFACE_TYPES[ln["type"]](object_id=key, outline=Polyline3D.from_array(outline))
+            yield (Walkway if walkway else SURFACE_TYPES[ln["type"]])(object_id=key, outline=Polyline3D.from_array(outline))
 
     # 9. Road edges: boundaries of the filled surface of each layer, without the seams where layers join.
     runs = []
