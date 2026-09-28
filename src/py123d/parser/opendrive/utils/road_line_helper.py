@@ -1,12 +1,15 @@
+from typing import Any, Dict, Final, Generator, List, Set, Tuple
+
 import numpy as np
+import numpy.typing as npt
 import shapely
 
-from py123d.datatypes import RoadLine, RoadLineType
+from py123d.datatypes import BaseMapObject, RoadLine, RoadLineType
 from py123d.geometry.polyline import Polyline3D
 from py123d.parser.opendrive.utils.id_system import lane_key
 from py123d.parser.opendrive.xodr_parser.lane import eval_borders
 
-ROAD_LINE_TYPES = {
+_ROAD_LINE_TYPES: Final[Dict[Tuple[str, str], RoadLineType]] = {
     ("solid", "white"): RoadLineType.SOLID_WHITE,
     ("solid", "yellow"): RoadLineType.SOLID_YELLOW,
     ("broken", "white"): RoadLineType.DASHED_WHITE,
@@ -22,8 +25,18 @@ ROAD_LINE_TYPES = {
 }
 
 
-def iter_road_lines(roads, sampled, raised):
-    # Road lines from road marks, each mark lies on the outer border of its lane (lane 0: reference line).
+def iter_road_lines(
+    roads: Dict[int, Dict[str, Any]],
+    sampled: Dict[Tuple[int, int], Tuple[npt.NDArray[np.float64], Dict[int, npt.NDArray[np.float64]]]],
+    raised: Set[str],
+) -> Generator[BaseMapObject, None, List[shapely.LineString]]:
+    """Yields road lines from road marks, each mark lies on the outer border of its lane (lane 0: reference line).
+
+    :param roads: Parsed roads, keyed by id.
+    :param sampled: s-grid and lane borders per (road id, section index) (see collect_lanes).
+    :param raised: Ids of raised lanes.
+    :return: 2D curb lines, returned once all road lines are yielded.
+    """
     curbs = []
     for (road_id, k), (grid, borders) in sampled.items():
         road, sections = roads[road_id], roads[road_id]["sections"]
@@ -44,7 +57,7 @@ def iter_road_lines(roads, sampled, raised):
                 color = "white" if mark["color"] in (None, "standard") else mark["color"]
                 yield RoadLine(
                     object_id=f"{road_id}_{k}_{i}_mark_{j}",
-                    road_line_type=ROAD_LINE_TYPES[mark["type"], color],
+                    road_line_type=_ROAD_LINE_TYPES[mark["type"], color],
                     polyline=Polyline3D.from_array(points),
                 )
     return curbs

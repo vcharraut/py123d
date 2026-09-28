@@ -32,6 +32,10 @@ class OpenDriveMapParser(BaseMapParser):
 
 
 def iter_xodr_map_objects(xodr_file: Path) -> Iterator[BaseMapObject]:
+    """Yields all map objects extracted from an OpenDRIVE (.xodr) file.
+
+    :param xodr_file: Path to the OpenDRIVE (.xodr or .xodr.gz) file.
+    """
     roads, junctions = load_xodr(xodr_file)
     lanes, sampled, raised, curb_lanes = collect_lanes(roads)
     all_successors, all_predecessors, is_lane, predecessors, successors = collect_topology(roads, junctions, lanes)
@@ -40,6 +44,14 @@ def iter_xodr_map_objects(xodr_file: Path) -> Iterator[BaseMapObject]:
     crosswalk_tree, painted_stop_lines, painted_tree, painted_directions = yield from iter_crosswalks(roads)
     stop_lines = collect_stop_lines(roads, lanes, all_successors, all_predecessors)
     yield from iter_stop_zones(
-        roads, lanes, is_lane, all_successors, stop_lines, crosswalk_tree, painted_stop_lines, painted_tree, painted_directions
+        roads,
+        lanes,
+        is_lane,
+        all_successors,
+        stop_lines,
+        crosswalk_tree,
+        painted_stop_lines,
+        painted_tree,
+        painted_directions,
     )
     yield from iter_road_surfaces(roads, lanes, raised, curb_lanes, curbs, groups)

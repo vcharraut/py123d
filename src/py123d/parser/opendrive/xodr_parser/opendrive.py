@@ -1,33 +1,40 @@
 import gzip
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Any, Dict, Final, Iterable, Optional, Tuple
 
 import numpy as np
+import numpy.typing as npt
 
-SPEED_TO_MPS = {"m/s": 1.0, "km/h": 1 / 3.6, "mph": 0.44704}
+_SPEED_TO_MPS: Final[Dict[str, float]] = {"m/s": 1.0, "km/h": 1 / 3.6, "mph": 0.44704}
 
 
-def load_xodr(path: Path):
+def load_xodr(path: Path) -> Tuple[Dict[int, Dict[str, Any]], Dict[int, ET.Element]]:
+    """Loads the roads and junctions of an OpenDRIVE file.
+
+    :param path: Path to the OpenDRIVE (.xodr or .xodr.gz) file.
+    :return: Parsed roads and raw junction elements, both keyed by id.
+    """
     with (gzip.open if path.suffix == ".gz" else open)(path, "rb") as f:
         root = ET.parse(f).getroot()
-    roads = {int(r.get("id")): parse_road(r) for r in root.findall("road")}
+    roads = {int(r.get("id")): _parse_road(r) for r in root.findall("road")}
     junctions = {int(j.get("id")): j for j in root.findall("junction")}
     return roads, junctions
 
 
-def _poly_records(elements, s_key="s", base=0.0):
+def _poly_records(elements: Iterable[ET.Element], s_key: str = "s", base: float = 0.0) -> npt.NDArray[np.float64]:
     return np.array(
         [[base + float(e.get(s_key)), *(float(e.get(k)) for k in "abcd")] for e in elements], dtype=np.float64
     ).reshape(-1, 5)
 
 
-def _link_id(link, tag, attribute):
+def _link_id(link: Optional[ET.Element], tag: str, attribute: str) -> int:
     # NOTE: libcarla keeps only the first link id (0 if missing); road and junction ids share one namespace.
     element = link.find(tag) if link is not None else None
     return int(element.get(attribute)) if element is not None else 0
 
 
-def parse_road(road):
+def _parse_road(road: ET.Element) -> Dict[str, Any]:
     geometry = []
     for g in road.find("planView").findall("geometry"):
         shape = g[0]
@@ -69,7 +76,7 @@ def parse_road(road):
     types = []
     for t in road.findall("type"):
         speed = t.find("speed")
-        mps = float(speed.get("max")) * SPEED_TO_MPS[speed.get("unit", "m/s")] if speed is not None else None
+        mps = float(speed.get("max")) * _SPEED_TO_MPS[speed.get("unit", "m/s")] if speed is not None else None
         types.append((float(t.get("s")), t.get("type"), mps))
 
     link = road.find("link")

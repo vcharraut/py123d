@@ -1,8 +1,17 @@
+from typing import Any, Dict, Tuple
+
 import numpy as np
+import numpy.typing as npt
 from scipy.special import fresnel
 
 
-def eval_poly(records, s):
+def eval_poly(records: npt.NDArray[np.float64], s: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """Evaluates piecewise cubic polynomial records (rows of s_start, a, b, c, d).
+
+    :param records: Polynomial records, sorted by s_start.
+    :param s: Positions along the road.
+    :return: Polynomial values at s.
+    """
     # NOTE: libcarla uses the last record with s_record <= s and yields 0 before the first record.
     if len(records) == 0:
         return np.zeros_like(s)
@@ -12,13 +21,23 @@ def eval_poly(records, s):
     return np.where(idx >= 0, r[:, 1] + ds * (r[:, 2] + ds * (r[:, 3] + ds * r[:, 4])), 0.0)
 
 
-def _odr_spiral(s, c_dot):
+def _odr_spiral(
+    s: npt.NDArray[np.float64], c_dot: npt.NDArray[np.float64]
+) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     a = np.sqrt(np.pi / np.abs(c_dot))
     fs, fc = fresnel(s / a)
     return a * fc, np.sign(c_dot) * a * fs, 0.5 * c_dot * s * s
 
 
-def eval_reference(road, s):
+def eval_reference(
+    road: Dict[str, Any], s: npt.NDArray[np.float64]
+) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Evaluates the plan view (reference line) of a road.
+
+    :param road: Parsed road.
+    :param s: Positions along the road, clipped to the road length.
+    :return: x, y and heading at s.
+    """
     geo = road["geometry"]
     s = np.clip(s, 0.0, road["length"])
     g = geo[np.clip(np.searchsorted(geo[:, 0], s, side="right") - 1, 0, None)]

@@ -1,24 +1,40 @@
+from typing import Any, Dict, Final, Generator, List, Tuple
+
 import numpy as np
+import numpy.typing as npt
 import shapely
 
-from py123d.datatypes import Crosswalk
+from py123d.datatypes import BaseMapObject, Crosswalk
 from py123d.geometry.polyline import Polyline3D
 from py123d.parser.opendrive.xodr_parser.lane import eval_borders, section_at
 from py123d.parser.opendrive.xodr_parser.reference import eval_poly, eval_reference
 
-STOP_LINE_SNAP = 0.2  # [m]
+_STOP_LINE_SNAP: Final[float] = 0.2  # [m]
 
 
-def iter_crosswalks(roads):
-    # Crosswalks (libcarla Map::GetAllCrosswalkZones): outline corners relative to the offset reference line.
-    # Painted "StopLine*" objects use the same outline convention and are kept to place stop zones.
+def iter_crosswalks(
+    roads: Dict[int, Dict[str, Any]],
+) -> Generator[
+    BaseMapObject, None, Tuple[shapely.STRtree, List[shapely.Polygon], shapely.STRtree, npt.NDArray[np.float64]]
+]:
+    """Yields crosswalks (libcarla Map::GetAllCrosswalkZones): outline corners relative to the offset reference line.
+
+    Painted "StopLine*" objects use the same outline convention and are kept to place stop zones.
+
+    :param roads: Parsed roads, keyed by id.
+    :return: Crosswalk tree, painted stop line areas, their tree and their (n, 2) unit directions, returned once all
+        crosswalks are yielded.
+    """
     crosswalks, painted_stop_lines, painted_directions = [], [], []
     for road_id, road in roads.items():
         for obj in road["objects"].findall("object") if road["objects"] is not None else []:
             is_crosswalk = obj.get("type") == "crosswalk" or "crosswalk" in obj.get("name", "").lower()
-            if not is_crosswalk and not (obj.get("name", "").startswith("StopLine") and obj.find("outline") is not None):
+            is_stop_line = obj.get("name", "").startswith("StopLine") and obj.find("outline") is not None
+            if not is_crosswalk and not is_stop_line:
                 continue
-            corners = np.array([[float(c.get(a)) for a in "uvz"] for c in obj.find("outline").findall("cornerLocal")])
+            corners = np.array(
+                [[float(c.get(a)) for a in "uvz"] for c in obj.find("outline").findall("cornerLocal")]
+            )
             s, t = np.array([float(obj.get("s"))]), float(obj.get("t", 0.0))
             base = eval_borders(road, section_at(road, s[0]), s)[0][0]
             # NOTE: libcarla's lane 0 transform: heading plus the raw laneOffset derivative, pitch is the raw elevation
@@ -32,13 +48,16 @@ def iter_crosswalks(roads):
             pivot = base + t * np.array([-np.cos(p) * np.sin(h), np.cos(p) * np.cos(h), np.sin(p)])
             outline = pivot + corners @ np.stack([u_axis, v_axis, z_axis])
             if not is_crosswalk:
-                painted_stop_lines.append(shapely.LineString(outline[:, :2]).buffer(STOP_LINE_SNAP))
+                painted_stop_lines.append(shapely.LineString(outline[:, :2]).buffer(_STOP_LINE_SNAP))
                 edges = np.diff(outline[:, :2], axis=0)
                 longest = edges[np.argmax(np.linalg.norm(edges, axis=1))]
                 painted_directions.append(longest / np.linalg.norm(longest))
                 continue
             crosswalks.append(shapely.Polygon(outline[:, :2]) if len(outline) > 2 else shapely.Polygon())
-            yield Crosswalk(object_id=f"{road_id}_object_{obj.get('id')}", outline=Polyline3D.from_array(np.vstack([outline, outline[:1]])))
+            yield Crosswalk(
+                object_id=f"{road_id}_object_{obj.get('id')}",
+                outline=Polyline3D.from_array(np.vstack([outline, outline[:1]])),
+            )
     crosswalk_tree = shapely.STRtree([c if c.is_valid else shapely.make_valid(c) for c in crosswalks])
     painted_tree = shapely.STRtree(painted_stop_lines)
     painted_directions = np.array(painted_directions).reshape(-1, 2)
