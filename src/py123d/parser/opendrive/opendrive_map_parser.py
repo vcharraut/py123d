@@ -522,14 +522,31 @@ def iter_xodr_map_objects(xodr_file: Path) -> Iterator[BaseMapObject]:
         lifts.append(lift)
 
     # 4. Other lane types become outline-only surfaces (not raised and not part of a dropped surface piece). Sidewalks
-    # and curb strips (the kerb between road edge and sidewalk) are walkways.
+    # and curb strips (the kerb between road edge and sidewalk) are walkways; adjacent ones of a section side merge.
     dropped = shapely.union_all(dropped)
+    is_walkway = lambda k: (lanes[k]["type"] == "sidewalk" or k in curb_lanes) and len(lanes[k]["inner"]) > 1
+    walkway_runs = []
+    for key in sorted(filter(is_walkway, lanes), key=lambda k: (lanes[k]["road"], lanes[k]["section"], np.sign(lanes[k]["id"]), abs(lanes[k]["id"]))):
+        prev = lanes[walkway_runs[-1][-1]] if walkway_runs else None
+        ln = lanes[key]
+        if prev and (prev["road"], prev["section"], prev["id"] + np.sign(ln["id"])) == (ln["road"], ln["section"], ln["id"]):
+            walkway_runs[-1].append(key)
+        else:
+            walkway_runs.append([key])
+    road_area = shapely.union_all(regions)
+    for run in walkway_runs:
+        first, last = lanes[run[0]], lanes[run[-1]]
+        outline = np.vstack([first["inner"], last["outer"][::-1], first["inner"][:1]])
+        polygon = shapely.make_valid(shapely.Polygon(outline[:, :2]))
+        # NOTE: Junction sidewalk lanes crossing the carriageway are pedestrian crossings, not walkways.
+        if polygon.intersection(road_area).area > 0.5 * polygon.area:
+            continue
+        yield Walkway(object_id=run[0], outline=Polyline3D.from_array(outline))
     for key, ln in lanes.items():
-        walkway = ln["type"] == "sidewalk" or key in curb_lanes
         surface = ln["type"] in SURFACE_TYPES and key not in raised and not polygon_of(ln).representative_point().within(dropped)
-        if (walkway or surface) and len(ln["inner"]) > 1:
+        if surface and not is_walkway(key) and len(ln["inner"]) > 1:
             outline = np.vstack([ln["inner"], ln["outer"][::-1], ln["inner"][:1]])
-            yield (Walkway if walkway else SURFACE_TYPES[ln["type"]])(object_id=key, outline=Polyline3D.from_array(outline))
+            yield SURFACE_TYPES[ln["type"]](object_id=key, outline=Polyline3D.from_array(outline))
 
     # 9. Road edges: boundaries of the filled surface of each layer, without the seams where layers join.
     runs = []
