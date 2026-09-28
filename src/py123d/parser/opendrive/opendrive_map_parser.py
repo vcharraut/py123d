@@ -131,7 +131,7 @@ def iter_xodr_map_objects(xodr_file: Path) -> Iterator[BaseMapObject]:
     roads, junctions = load_xodr(xodr_file)
 
     # 1. Sample every lane of every section on a shared s-grid, oriented along the lane's driving direction.
-    lanes, sampled, raised = {}, {}, set()
+    lanes, sampled, raised, curb_lanes = {}, {}, set(), set()
     for road_id, road in roads.items():
         for k, section in enumerate(road["sections"]):
             grid, borders = section_grid(road, k)
@@ -181,10 +181,16 @@ def iter_xodr_map_objects(xodr_file: Path) -> Iterator[BaseMapObject]:
                 for i, lane in section["lanes"].items()
                 if i and (lane["type"] == "median" or any(m["type"] == "curb" for m in lane["marks"]))
             }
+            curb_lanes |= {
+                lane_key(road_id, k, i)
+                for i, lane in section["lanes"].items()
+                if i and lane["type"] != "median" and any(m["type"] == "curb" for m in lane["marks"])
+            }
 
-    # NOTE: Non-driving lanes overlapping a raised median / island (e.g. junction shoulders) are raised as well.
-    polygon_of = lambda ln: shapely.make_valid(shapely.Polygon(np.vstack([ln["inner"], ln["outer"][::-1]])[:, :2]))
-    raised_area = shapely.union_all([polygon_of(lanes[k]) for k in raised])
+    # NOTE: Non-driving lanes overlapping a raised median / island (e.g. junction shoulders) are raised as well. Curb
+    # lanes are thin kerbs: they neither spread raising nor keep holes open.
+    polygon_of = lambda ln: shapely.Polygon(np.vstack([ln["inner"], ln["outer"][::-1]])[:, :2]).buffer(0)
+    raised_area = shapely.union_all([polygon_of(lanes[k]) for k in raised - curb_lanes])
     raised |= {
         k
         for k, ln in lanes.items()
@@ -458,7 +464,7 @@ def iter_xodr_map_objects(xodr_file: Path) -> Iterator[BaseMapObject]:
     surfaces = [outline_of(lanes[k]) for k in surface_keys]
     surfaces = [p if p.is_valid else max(shapely.get_parts(shapely.make_valid(p)), key=lambda q: q.area) for p in surfaces]
     blocking = shapely.STRtree(
-        [shapely.force_2d(outline_of(ln)) for k, ln in lanes.items() if (ln["type"] == "sidewalk" or k in raised) and len(ln["inner"]) > 1]
+        [shapely.force_2d(outline_of(ln)) for k, ln in lanes.items() if (ln["type"] == "sidewalk" or (k in raised and k not in curb_lanes)) and len(ln["inner"]) > 1]
     )
     blocking_area = shapely.union_all(shapely.make_valid(blocking.geometries))
     curb_zone = shapely.union_all(shapely.buffer(curbs, 0.2))
