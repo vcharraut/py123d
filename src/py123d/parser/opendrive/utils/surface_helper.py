@@ -17,7 +17,6 @@ from py123d.datatypes import (
 )
 from py123d.geometry.polyline import Polyline3D
 from py123d.parser.opendrive.utils.collection import KERB_MAX_WIDTH
-from py123d.parser.opendrive.utils.lane_helper import LANE_TYPES
 from py123d.parser.utils.map_utils.road_edge.road_edge_2d_utils import split_line_geometry_by_max_length
 
 _SURFACE_TYPES: Final[Dict[str, Type[BaseMapObject]]] = {
@@ -283,9 +282,10 @@ def iter_road_surfaces(
             object_id=n, road_edge_type=RoadEdgeType.ROAD_EDGE_BOUNDARY, polyline=Polyline3D.from_linestring(edge)
         )
 
-    # Remaining road-level surfaces (flush "none"/median lanes, filled holes) complete the drivable area.
+    # NOTE: Generic drivables cover the whole road surface: every road-level lane (driving,
+    # biking and parking lanes included, overlapping their Lane / Carpark) and the filled holes.
     for key in surface_keys:
-        if lanes[key]["type"] not in LANE_TYPES and lanes[key]["type"] not in _SURFACE_TYPES:
+        if _SURFACE_TYPES.get(lanes[key]["type"]) is not GenericDrivable:
             outline = np.vstack([lanes[key]["inner"], lanes[key]["outer"][::-1], lanes[key]["inner"][:1]])
             yield GenericDrivable(object_id=key, outline=Polyline3D.from_array(outline))
     for n, filler in enumerate(fillers):
