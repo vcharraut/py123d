@@ -49,7 +49,7 @@ def eval_reference(
 
     # arc (also spirals with constant curvature)
     c_dot = np.where(kind == 2, (c1 - c0) / g[:, 4], 0.0)
-    arc = (kind == 1) | ((kind == 2) & (c_dot == 0.0) & (c0 != 0.0))
+    arc = ((kind == 1) | ((kind == 2) & (c_dot == 0.0))) & (c0 != 0.0)
     k = np.where(arc, c0, 1.0)
     x = np.where(arc, x0 + (np.sin(h0 + k * ds) - np.sin(h0)) / k, x)
     y = np.where(arc, y0 - (np.cos(h0 + k * ds) - np.cos(h0)) / k, y)

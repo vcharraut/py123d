@@ -47,8 +47,9 @@ def iter_crosswalks(
     crosswalks, painted_stop_lines, painted_directions, signal_centres = [], [], [], []
     for road_id, road in roads.items():
         for obj in road["objects"].findall("object") if road["objects"] is not None else []:
-            is_crosswalk = obj.get("type") == "crosswalk" or "crosswalk" in obj.get("name", "").lower()
-            is_stop_line = obj.get("name", "").startswith("StopLine") and obj.find("outline") is not None
+            has_outline = obj.find("outline") is not None
+            is_crosswalk = has_outline and (obj.get("type") == "crosswalk" or "crosswalk" in obj.get("name", "").lower())
+            is_stop_line = has_outline and obj.get("name", "").startswith("StopLine")
             if not is_crosswalk and not is_stop_line:
                 continue
             corners = np.array(

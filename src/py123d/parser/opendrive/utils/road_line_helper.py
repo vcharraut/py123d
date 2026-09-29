@@ -57,7 +57,7 @@ def iter_road_lines(
                 color = "white" if mark["color"] in (None, "standard") else mark["color"]
                 yield RoadLine(
                     object_id=f"{road_id}_{k}_{i}_mark_{j}",
-                    road_line_type=_ROAD_LINE_TYPES[mark["type"], color],
+                    road_line_type=_ROAD_LINE_TYPES.get((mark["type"], color), RoadLineType.DASHED_WHITE),
                     polyline=Polyline3D.from_array(points),
                 )
     return curbs
