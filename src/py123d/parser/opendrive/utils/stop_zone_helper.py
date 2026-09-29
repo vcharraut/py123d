@@ -20,7 +20,7 @@ def iter_stop_zones(
     lanes: Dict[str, Dict[str, Any]],
     is_lane: Dict[str, None],
     all_successors: Dict[str, List[str]],
-    stop_lines: Dict[Tuple[str, bool], StopZoneType],
+    stop_lines: Dict[Tuple[str, bool], Tuple[StopZoneType, Optional[str], Optional[int]]],
     crosswalk_tree: shapely.STRtree,
     painted_stop_lines: List[shapely.Polygon],
     painted_tree: shapely.STRtree,
@@ -32,7 +32,8 @@ def iter_stop_zones(
     :param lanes: Lanes, keyed by lane id (see collect_lanes).
     :param is_lane: Ordered ids of py123d lanes.
     :param all_successors: Successors over all lanes.
-    :param stop_lines: Stop zone type per (lane id, stop line at the lane start) (see collect_stop_lines).
+    :param stop_lines: Stop zone type, signal group id and signal sequence per (lane id, stop line at the lane start)
+        (see collect_stop_lines).
     :param crosswalk_tree: Tree of the crosswalk polygons.
     :param painted_stop_lines: Painted stop line areas.
     :param painted_tree: Tree of the painted stop line areas.
@@ -80,6 +81,8 @@ def iter_stop_zones(
         s_stop: float,
         controlled: List[str],
         painted: bool = False,
+        signal_group_id: Optional[str] = None,
+        signal_sequence: Optional[int] = None,
     ) -> StopZone:
         # NOTE: The 0.5 m strip lies upstream of the stop position, across the full lane width (oriented along the
         # painted line if there is one). The controlled lanes start at the stop line (junction lanes), like
@@ -104,10 +107,14 @@ def iter_stop_zones(
             stop_zone_type=zone_type,
             outline=Polyline3D.from_array(np.vstack([inner, outer[::-1], inner[:1]])),
             lane_ids=controlled,
+            # NOTE: The controlled lanes are junction lanes, whose junction is the stop zone's intersection.
+            intersection_id=lanes[controlled[0]]["junction"] if lanes[controlled[0]]["junction"] != -1 else None,
+            signal_group_id=signal_group_id,
+            signal_sequence=signal_sequence,
         )
 
     signal_zones = []
-    for (key, at_start), zone_type in stop_lines.items():
+    for (key, at_start), (zone_type, signal_group_id, signal_sequence) in stop_lines.items():
         controlled = [key] if at_start else [s for s in all_successors[key] if s in is_lane] or [key]
         # NOTE: The vehicle stops at the painted stop line (on the approach or the first junction lane), else before a
         # crosswalk on the approach, else at the junction entry (CARLA BasicAgent stop waypoint).
@@ -139,6 +146,8 @@ def iter_stop_zones(
             s_stop,
             controlled,
             len(painted_before) + len(painted_after) > 0,
+            signal_group_id,
+            signal_sequence,
         )
         signal_zones.append(zone.shapely_polygon)
         yield zone
@@ -154,6 +163,9 @@ def iter_stop_zones(
             continue
         for key in (driving_keys[j] for j in centre_tree.query(painted, predicate="intersects")):
             in_junction = lanes[key]["junction"] != -1
+            # NOTE: Stop lines guard junction entries: approach lanes must lead into a junction.
+            if not in_junction and all(lanes[s]["junction"] == -1 for s in all_successors[key]):
+                continue
             length = _STOP_LINE_JUNCTION_SEARCH if in_junction else _STOP_LINE_SEARCH
             hits = lane_hits(key, not in_junction, shapely.STRtree([painted]), length, painted_directions[n : n + 1])
             controlled = [key] if in_junction else [s for s in all_successors[key] if s in is_lane] or [key]

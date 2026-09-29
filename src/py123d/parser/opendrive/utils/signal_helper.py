@@ -1,4 +1,5 @@
-from typing import Any, Dict, Final, List, Tuple
+import xml.etree.ElementTree as ET
+from typing import Any, Dict, Final, List, Optional, Tuple
 
 from py123d.datatypes import StopZoneType
 from py123d.parser.opendrive.utils.id_system import lane_key
@@ -13,19 +14,37 @@ _STOP_ZONE_TYPES: Final[Dict[str, StopZoneType]] = {
 
 def collect_stop_lines(
     roads: Dict[int, Dict[str, Any]],
+    junctions: Dict[int, ET.Element],
+    controllers: Dict[int, List[str]],
     lanes: Dict[str, Dict[str, Any]],
     all_successors: Dict[str, List[str]],
     all_predecessors: Dict[str, List[str]],
-) -> Dict[Tuple[str, bool], StopZoneType]:
+) -> Dict[Tuple[str, bool], Tuple[StopZoneType, Optional[str], Optional[int]]]:
     """Collects stop lines across the lane where it enters the junction (CARLA BasicAgent stop waypoint), found from
     the lanes each traffic light / stop / yield signal is valid for.
 
     :param roads: Parsed roads, keyed by id.
+    :param junctions: Raw junction elements, keyed by id.
+    :param controllers: Signal ids of each controller, keyed by id.
     :param lanes: Lanes, keyed by lane id (see collect_lanes).
     :param all_successors: Successors over all lanes.
     :param all_predecessors: Predecessors over all lanes.
-    :return: Stop zone type per (lane id, stop line at the lane start instead of its end).
+    :return: Stop zone type, signal group id and signal sequence per (lane id, stop line at the lane start instead of
+        its end).
     """
+    # NOTE: A controller switches its signals together (signal group), the junction lists its controllers in cycle
+    # order (sequence). Signals without a controller form their own group.
+    controller_of = {}
+    for controller_id, signal_ids in controllers.items():
+        for signal_id in signal_ids:
+            controller_of.setdefault(signal_id, controller_id)
+    sequence_of = {
+        int(c.get("id")): int(c.get("sequence"))
+        for junction in junctions.values()
+        for c in junction.findall("controller")
+        if c.get("sequence") is not None
+    }
+
     signal_types, references = {}, []
     for road_id, road in roads.items():
         for element in road["signals"] if road["signals"] is not None else []:
@@ -46,6 +65,11 @@ def collect_stop_lines(
     stop_lines = {}
     for signal_id, road_id, s, validities in references:
         zone_type = _STOP_ZONE_TYPES.get(signal_types.get(signal_id))
+        controller_id = controller_of.get(signal_id)
+        group_id = f"controller_{controller_id}" if controller_id is not None else f"signal_{signal_id}"
+        if zone_type != StopZoneType.TRAFFIC_LIGHT:
+            group_id = None
+        sequence = sequence_of.get(controller_id) if group_id is not None else None
         k = section_at(roads[road_id], s)
         for from_lane, to_lane in validities if zone_type is not None else []:
             for lane_id in range(min(from_lane, to_lane), max(from_lane, to_lane) + 1):
@@ -61,5 +85,5 @@ def collect_stop_lines(
                     if not nexts or lanes[nexts[0]]["junction"] != -1:
                         break
                     key = nexts[0]
-                stop_lines.setdefault((key, at_start), zone_type)
+                stop_lines.setdefault((key, at_start), (zone_type, group_id, sequence))
     return stop_lines

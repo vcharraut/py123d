@@ -150,6 +150,9 @@ class ArrowMapWriter(BaseMapWriter):
         self._write_surface_layer(MapLayer.STOP_ZONE, stop_zone)
         self._map_data[MapLayer.STOP_ZONE]["stop_zone_type"].append(int(stop_zone.stop_zone_type))
         self._map_data[MapLayer.STOP_ZONE]["lane_ids"].append(stop_zone.lane_ids)
+        self._map_data[MapLayer.STOP_ZONE]["intersection_id"].append(stop_zone.intersection_id)
+        self._map_data[MapLayer.STOP_ZONE]["signal_group_id"].append(stop_zone.signal_group_id)
+        self._map_data[MapLayer.STOP_ZONE]["signal_sequence"].append(stop_zone.signal_sequence)
 
     def _write_speed_bump(self, speed_bump: SpeedBump) -> None:
         self._write_surface_layer(MapLayer.SPEED_BUMP, speed_bump)
@@ -290,6 +293,9 @@ class ArrowMapWriter(BaseMapWriter):
                     "outline": self._map_data[MapLayer.STOP_ZONE]["outline"][idx],
                     "stop_zone_type": self._map_data[MapLayer.STOP_ZONE]["stop_zone_type"][idx],
                     "lane_ids": self._map_data[MapLayer.STOP_ZONE]["lane_ids"][idx],
+                    "intersection_id": self._map_data[MapLayer.STOP_ZONE]["intersection_id"][idx],
+                    "signal_group_id": self._map_data[MapLayer.STOP_ZONE]["signal_group_id"][idx],
+                    "signal_sequence": self._map_data[MapLayer.STOP_ZONE]["signal_sequence"][idx],
                 }
                 all_features.append(msgpack_encode_with_numpy(stop_zone_dict))  # type: ignore
 
@@ -406,6 +412,9 @@ def _map_ids_to_integer(map_data: Dict[MapLayer, Dict[str, Any]]) -> None:
     carpark_id_mapping = ToIntMapping.from_list(map_data[MapLayer.CARPARK]["id"])
     generic_drivable_id_mapping = ToIntMapping.from_list(map_data[MapLayer.GENERIC_DRIVABLE]["id"])
     stop_zone_id_mapping = ToIntMapping.from_list(map_data[MapLayer.STOP_ZONE]["id"])
+    signal_group_id_mapping = ToIntMapping.from_list(
+        [group_id for group_id in map_data[MapLayer.STOP_ZONE]["signal_group_id"] if group_id is not None]
+    )
     speed_bump_id_mapping = ToIntMapping.from_list(map_data[MapLayer.SPEED_BUMP]["id"])
     road_line_id_mapping = ToIntMapping.from_list(map_data[MapLayer.ROAD_LINE]["id"])
     road_edge_id_mapping = ToIntMapping.from_list(map_data[MapLayer.ROAD_EDGE]["id"])
@@ -473,6 +482,12 @@ def _map_ids_to_integer(map_data: Dict[MapLayer, Dict[str, Any]]) -> None:
             map_data[MapLayer.STOP_ZONE]["id"][idx] = stop_zone_id_mapping.map(map_data[MapLayer.STOP_ZONE]["id"][idx])
             map_data[MapLayer.STOP_ZONE]["lane_ids"][idx] = lane_id_mapping.map_list(
                 map_data[MapLayer.STOP_ZONE]["lane_ids"][idx]
+            )
+            map_data[MapLayer.STOP_ZONE]["intersection_id"][idx] = intersection_id_mapping.map(
+                map_data[MapLayer.STOP_ZONE]["intersection_id"][idx]
+            )
+            map_data[MapLayer.STOP_ZONE]["signal_group_id"][idx] = signal_group_id_mapping.map(
+                map_data[MapLayer.STOP_ZONE]["signal_group_id"][idx]
             )
     if len(map_data[MapLayer.SPEED_BUMP]["id"]) > 0:
         for idx in range(len(map_data[MapLayer.SPEED_BUMP]["id"])):

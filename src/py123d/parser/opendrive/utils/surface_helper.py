@@ -253,10 +253,12 @@ def iter_road_surfaces(
             piece_outline = np.column_stack([xy, outline[lift.query(xy)[1], 2]])
             yield Walkway(object_id=f"{key}_{n}", outline=Polyline3D.from_array(piece_outline))
     for key, lane in lanes.items():
+        # NOTE: Parking lanes of junction roads cross the intersection: they are junction surface, no carparks.
         surface = (
             lane["type"] in _SURFACE_TYPES
             and key not in raised
             and not polygon_of(lane).representative_point().within(dropped)
+            and not (lane["type"] == "parking" and lane["junction"] != -1)
         )
         if surface and not is_walkway(key) and len(lane["inner"]) > 1:
             outline = np.vstack([lane["inner"], lane["outer"][::-1], lane["inner"][:1]])

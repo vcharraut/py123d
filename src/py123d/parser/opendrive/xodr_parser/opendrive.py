@@ -1,7 +1,7 @@
 import gzip
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any, Dict, Final, Iterable, Optional, Tuple
+from typing import Any, Dict, Final, Iterable, List, Optional, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -9,17 +9,20 @@ import numpy.typing as npt
 _SPEED_TO_MPS: Final[Dict[str, float]] = {"m/s": 1.0, "km/h": 1 / 3.6, "mph": 0.44704}
 
 
-def load_xodr(path: Path) -> Tuple[Dict[int, Dict[str, Any]], Dict[int, ET.Element]]:
-    """Loads the roads and junctions of an OpenDRIVE file.
+def load_xodr(path: Path) -> Tuple[Dict[int, Dict[str, Any]], Dict[int, ET.Element], Dict[int, List[str]]]:
+    """Loads the roads, junctions and signal controllers of an OpenDRIVE file.
 
     :param path: Path to the OpenDRIVE (.xodr or .xodr.gz) file.
-    :return: Parsed roads and raw junction elements, both keyed by id.
+    :return: Parsed roads, raw junction elements and the signal ids of each controller, all keyed by id.
     """
     with (gzip.open if path.suffix == ".gz" else open)(path, "rb") as f:
         root = ET.parse(f).getroot()
     roads = {int(r.get("id")): _parse_road(r) for r in root.findall("road")}
     junctions = {int(j.get("id")): j for j in root.findall("junction")}
-    return roads, junctions
+    controllers = {
+        int(c.get("id")): [x.get("signalId") for x in c.findall("control")] for c in root.findall("controller")
+    }
+    return roads, junctions, controllers
 
 
 def _poly_records(elements: Iterable[ET.Element], s_key: str = "s", base: float = 0.0) -> npt.NDArray[np.float64]:
