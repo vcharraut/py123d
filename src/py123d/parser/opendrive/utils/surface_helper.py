@@ -16,6 +16,7 @@ from py123d.datatypes import (
     Walkway,
 )
 from py123d.geometry.polyline import Polyline3D
+from py123d.parser.opendrive.utils.collection import KERB_MAX_WIDTH
 from py123d.parser.opendrive.utils.lane_helper import LANE_TYPES
 from py123d.parser.utils.map_utils.road_edge.road_edge_2d_utils import split_line_geometry_by_max_length
 
@@ -34,6 +35,10 @@ _LAYER_DZ: Final[float] = 1.0  # [m], touching surfaces with larger height diffe
 _MAX_ROAD_EDGE_LENGTH: Final[float] = 100.0  # [m]
 _CLOSING: Final[float] = 0.05  # [m], closes slits between adjacent lanes
 _GAP_CLOSING: Final[float] = 0.5  # [m]
+_MIN_POCKET_AREA: Final[float] = 0.01  # [m^2], smaller kerb pockets are cracks between consecutive kerbs
+_SEAL: Final[float] = 0.001  # [m]
+_MIN_WALKWAY_ON_ROAD: Final[float] = 1.0  # [m^2], walkways overlapping the road more are clipped, smaller pieces go
+_ISLAND_KERB_FRACTION: Final[float] = 0.9  # kerb pockets with this much kerb on their boundary are raised islands
 # NOTE: Smaller disconnected road surface pieces are dropped (and thin ones without driving lanes).
 _MIN_SURFACE_AREA: Final[float] = 10.0  # [m^2]
 
@@ -87,6 +92,14 @@ def iter_road_surfaces(
         ]
     )
     blocking_area = shapely.union_all(shapely.make_valid(blocking.geometries))
+    kerb_area = shapely.union_all(
+        [
+            shapely.force_2d(outline_of(lanes[k])).buffer(0)
+            for k in curb_lanes
+            if lanes[k]["type"] != "sidewalk" and len(lanes[k]["inner"]) > 1
+        ]
+    )
+    kerb_zone = kerb_area.buffer(0.02)
     curb_zone = shapely.union_all(shapely.buffer(curbs, 0.2))
     junction_zone = shapely.union_all(
         shapely.buffer([shapely.force_2d(p) for k, p in zip(surface_keys, surfaces) if lanes[k]["junction"] != -1], 0.2)
@@ -99,6 +112,14 @@ def iter_road_surfaces(
         # NOTE: Holes enclosed by regular roads (not junction gaps) are islands, e.g. roundabout centres.
         in_junction = hole.exterior.intersection(junction_zone).length >= 0.5 * hole.exterior.length
         return radius >= _KEEP_HOLE_RADIUS or blocked or (radius >= _ISLAND_MIN_RADIUS and (curbed or not in_junction))
+
+    def keep_pocket(pocket: shapely.Polygon) -> bool:
+        # NOTE: Kerb pockets are road (junction corners, gore areas) unless kerbs enclose them (raised islands) or they
+        # are large or blocked off-road areas (checked against CARLA renders).
+        radius = shapely.maximum_inscribed_circle(pocket, 0.1).length
+        blocked = len(blocking.query(pocket.buffer(-0.1), predicate="intersects")) > 0
+        enclosed = pocket.exterior.intersection(kerb_zone).length >= _ISLAND_KERB_FRACTION * pocket.exterior.length
+        return radius >= _KEEP_HOLE_RADIUS or blocked or (enclosed and keep(pocket))
 
     def z_near(polygon: shapely.Polygon, xy: npt.NDArray[np.float64]) -> float:
         coordinates = shapely.get_coordinates(polygon.exterior, include_z=True)
@@ -151,11 +172,38 @@ def iter_road_surfaces(
         # sidewalks or raised lanes.
         gaps = union.buffer(_GAP_CLOSING, join_style="mitre").buffer(-_GAP_CLOSING, join_style="mitre")
         union = shapely.union_all([union, gaps.difference(blocking_area)])
+        holes = [shapely.Polygon(r) for p in shapely.get_parts(union) for r in p.interiors]
+        # NOTE: Ground-level holes containing kerbs are decided as kerb pockets (below).
         filled = [
-            shapely.Polygon(r) for p in shapely.get_parts(union) for r in p.interiors if not keep(shapely.Polygon(r))
+            h for h in holes if not keep(h) and (regions or h.intersection(kerb_area).area <= _MIN_POCKET_AREA)
         ]
+        region = shapely.union_all([union] + filled)
+        if not regions:
+            # NOTE: Kerb strips close the ground-level surface: pockets between kerb and lanes (junction corners, gore
+            # areas) are holes as well, but not the cracks between consecutive kerbs. The kerbs themselves are no road.
+            # A tiny closing seals the hairline leaks between kerb ends and lanes.
+            closed = shapely.union_all([union, kerb_area], grid_size=0.001)
+            closed = closed.buffer(_SEAL, join_style="mitre").buffer(-_SEAL, join_style="mitre")
+            pockets = [shapely.Polygon(r) for p in shapely.get_parts(closed) for r in p.interiors]
+            filled_area = shapely.union_all(filled)
+            filled += [
+                h
+                for h in pockets
+                if h.area > _MIN_POCKET_AREA
+                and h.distance(kerb_area) < 0.01
+                and not h.representative_point().within(filled_area)
+                and not keep_pocket(h)
+            ]
+            # NOTE: Snapping closes the hairline slits between kerb pockets and lanes. Kerbs with road on both sides
+            # (along filled gore areas) are road as well.
+            region = closed_union([union] + filled)
+            half = KERB_MAX_WIDTH / 2
+            closing = region.buffer(half, join_style="mitre").buffer(-half, join_style="mitre")
+            sandwiched = [p for p in shapely.get_parts(closing.intersection(kerb_area)) if p.geom_type == "Polygon"]
+            filled += [p for p in sandwiched if shapely.maximum_inscribed_circle(p, 0.01).length > 0.1]
+            region = closed_union([union] + filled)
         fillers += [shapely.Polygon(lift(shapely.get_coordinates(f.exterior))) for f in filled]
-        regions.append(shapely.union_all([union] + filled))
+        regions.append(region)
         lifts.append(lift)
 
     # Other lane types become outline-only surfaces (not raised and not part of a dropped surface piece). Sidewalks
@@ -177,14 +225,34 @@ def iter_road_surfaces(
         else:
             walkway_runs.append([key])
     road_area = shapely.union_all(regions)
+    walkways, clipped = [], []
     for run in walkway_runs:
         first, last = lanes[run[0]], lanes[run[-1]]
         outline = np.vstack([first["inner"], last["outer"][::-1], first["inner"][:1]])
         polygon = shapely.make_valid(shapely.Polygon(outline[:, :2]))
         # NOTE: Junction sidewalk lanes crossing the carriageway are pedestrian crossings, not walkways.
-        if polygon.intersection(road_area).area > 0.5 * polygon.area:
+        on_road = polygon.intersection(road_area).area
+        if on_road > 0.5 * polygon.area:
             continue
+        if on_road > _MIN_WALKWAY_ON_ROAD:
+            clipped.append((run[0], outline, polygon))
+            continue
+        walkways.append(polygon)
         yield Walkway(object_id=run[0], outline=Polyline3D.from_array(outline))
+    # NOTE: Kerbs running on into the carriageway (junction roads) are walkways off the road and other walkways only.
+    covered = shapely.union_all([road_area] + walkways)
+    for key, outline, polygon in clipped:
+        lift = cKDTree(outline[:, :2])
+        pieces = [p for p in shapely.get_parts(polygon.difference(covered)) if p.geom_type == "Polygon"]
+        pieces = [
+            p
+            for p in pieces
+            if p.area >= _MIN_WALKWAY_ON_ROAD and shapely.maximum_inscribed_circle(p, 0.01).length > 0.1
+        ]
+        for n, piece in enumerate(pieces):
+            xy = shapely.get_coordinates(piece.exterior)
+            piece_outline = np.column_stack([xy, outline[lift.query(xy)[1], 2]])
+            yield Walkway(object_id=f"{key}_{n}", outline=Polyline3D.from_array(piece_outline))
     for key, lane in lanes.items():
         surface = (
             lane["type"] in _SURFACE_TYPES

@@ -12,6 +12,7 @@ from py123d.parser.opendrive.xodr_parser.lane import section_grid
 _MEDIAN_TYPES: Final[Set[str]] = {"shoulder", "median", "none", "border"}
 _RAISED_MEDIAN_TYPES: Final[Set[str]] = {"median"}
 _MEDIAN_MIN_WIDTH: Final[float] = 1.0  # [m]
+KERB_MAX_WIDTH: Final[float] = 1.0  # [m]
 
 
 def collect_lanes(
@@ -86,6 +87,17 @@ def collect_lanes(
                 for i, lane in section["lanes"].items()
                 if i and lane["type"] != "median" and any(m["type"] == "curb" for m in lane["marks"])
             }
+            # NOTE: A "curb" mark lies on the kerb / sidewalk border, whichever lane carries it (its outer border, lane
+            # 0: the reference line). Narrow non-driving strips on either side of that border are the kerb as well.
+            for i, lane in section["lanes"].items():
+                if not any(m["type"] == "curb" for m in lane["marks"]):
+                    continue
+                for j in (i, i + np.sign(i)) if i else (1, -1):
+                    kerb = section["lanes"].get(j, {"type": "driving"})["type"] not in ("driving", "sidewalk", "median")
+                    width = np.max(np.linalg.norm(borders[j] - borders[j - np.sign(j)], axis=1)) if kerb else np.inf
+                    if width < KERB_MAX_WIDTH:
+                        raised.add(lane_key(road_id, k, j))
+                        curb_lanes.add(lane_key(road_id, k, j))
 
     # NOTE: Non-driving lanes overlapping a raised median / island (e.g. junction shoulders) are raised as well. Curb
     # lanes are thin kerbs: they neither spread raising nor keep holes open.
