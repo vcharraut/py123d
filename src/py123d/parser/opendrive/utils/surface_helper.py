@@ -266,6 +266,7 @@ def iter_road_surfaces(
     runs = []
     for n, region in enumerate(regions):
         other = regions[1 - n]
+        region = shapely.orient_polygons(region, exterior_cw=True)
         for ring in [r for p in shapely.get_parts(region) for r in [p.exterior, *p.interiors]]:
             coords = lifts[n](shapely.get_coordinates(ring))
             mid = 0.5 * (coords[:-1] + coords[1:])
@@ -275,7 +276,7 @@ def iter_road_surfaces(
                 seam = near & (np.abs(lifts[1 - n](mid[:, :2])[:, 2] - mid[:, 2]) < _LAYER_DZ)
             cuts = np.flatnonzero(np.diff(np.concatenate([[1], seam, [1]])))
             runs += [coords[a : b + 1] for a, b in zip(cuts[::2], cuts[1::2]) if b > a]
-    edges = shapely.line_merge(shapely.MultiLineString(runs))
+    edges = shapely.line_merge(shapely.MultiLineString(runs), directed=True)
     edges = [e for e in shapely.get_parts(edges) if e.length > 0.05]
     for n, edge in enumerate(split_line_geometry_by_max_length(edges, _MAX_ROAD_EDGE_LENGTH)):
         yield RoadEdge(
