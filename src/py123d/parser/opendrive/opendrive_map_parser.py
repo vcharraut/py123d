@@ -38,8 +38,10 @@ def iter_xodr_map_objects(xodr_file: Path) -> Iterator[BaseMapObject]:
     """
     roads, junctions, controllers = load_xodr(xodr_file)
     lanes, sampled, raised, curb_lanes = collect_lanes(roads)
-    all_successors, all_predecessors, is_lane, predecessors, successors = collect_topology(roads, junctions, lanes)
-    groups = yield from iter_lanes_and_lane_groups(lanes, is_lane, predecessors, successors)
+    all_successors, all_predecessors, is_lane, predecessors, successors, openings = collect_topology(
+        roads, junctions, lanes
+    )
+    groups = yield from iter_lanes_and_lane_groups(lanes, is_lane, predecessors, successors, openings)
     curbs = yield from iter_road_lines(roads, sampled, raised)
     crosswalk_tree, painted_stop_lines, painted_tree, painted_directions = yield from iter_crosswalks(roads)
     stop_lines = collect_stop_lines(roads, junctions, controllers, lanes, all_successors, all_predecessors)

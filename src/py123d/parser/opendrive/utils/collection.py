@@ -6,13 +6,14 @@ import numpy.typing as npt
 import shapely
 
 from py123d.parser.opendrive.utils.id_system import lane_key
-from py123d.parser.opendrive.utils.lane_helper import LANE_TYPES
+from py123d.parser.opendrive.utils.lane_helper import LANE_TYPES, MIN_LANE_WIDTH
 from py123d.parser.opendrive.xodr_parser.lane import section_grid
 
 _MEDIAN_TYPES: Final[Set[str]] = {"shoulder", "median", "none", "border"}
 _RAISED_MEDIAN_TYPES: Final[Set[str]] = {"median"}
 _MEDIAN_MIN_WIDTH: Final[float] = 1.0  # [m]
 KERB_MAX_WIDTH: Final[float] = 1.0  # [m]
+_MIN_OPENING_LANE_WIDTH: Final[float] = 2.0  # [m], narrower dead-end lanes are slivers, no entry / exit lanes
 
 
 def collect_lanes(
@@ -162,14 +163,22 @@ def _lane_successors(
 
 def collect_topology(
     roads: Dict[int, Dict[str, Any]], junctions: Dict[int, ET.Element], lanes: Dict[str, Dict[str, Any]]
-) -> Tuple[Dict[str, List[str]], Dict[str, List[str]], Dict[str, None], Dict[str, List[str]], Dict[str, List[str]]]:
+) -> Tuple[
+    Dict[str, List[str]],
+    Dict[str, List[str]],
+    Dict[str, None],
+    Dict[str, List[str]],
+    Dict[str, List[str]],
+    Dict[str, List[Tuple[str, bool]]],
+]:
     """Computes the lane topology (libcarla semantics), py123d lanes only link to py123d lanes.
 
     :param roads: Parsed roads, keyed by id.
     :param junctions: Raw junction elements, keyed by id.
     :param lanes: Lanes, keyed by lane id (see collect_lanes).
-    :return: Successors and predecessors over all lanes, the ordered ids of py123d lanes (driving and biking), and
-        successors and predecessors restricted to py123d lanes.
+    :return: Successors and predecessors over all lanes, the ordered ids of py123d lanes (driving and biking),
+        successors and predecessors restricted to py123d lanes, and the (driving neighbour, at lane start) each lane
+        opens from or closes into.
     """
     all_successors = {
         key: list(
@@ -189,4 +198,30 @@ def collect_topology(
     for key, preds in predecessors.items():
         for p in preds:
             successors[p].append(key)
-    return all_successors, all_predecessors, is_lane, predecessors, successors
+
+    # NOTE: Entry / exit lanes (on / off ramps) open from or close into a driving neighbour: the XODR gives them zero
+    # width at that end and no link (libcarla dead ends). They take over the neighbour's predecessors / successors.
+    openings = {}
+    for key in is_lane:
+        lane = lanes[key]
+        sign = int(np.sign(lane["id"]))
+        neighbours = [
+            lane_key(lane["road"], lane["section"], lane["id"] + d) for d in (-1, 1) if (lane["id"] + d) * sign > 0
+        ]
+        neighbours = [n for n in neighbours if n in is_lane and lanes[n]["type"] == "driving"]
+        if lane["type"] != "driving" or not neighbours or len(lane["inner"]) < 2:
+            continue
+        width = np.linalg.norm(lane["outer"][:, :2] - lane["inner"][:, :2], axis=1)
+        if width.max() < _MIN_OPENING_LANE_WIDTH:
+            continue
+        if not predecessors[key] and width[0] < MIN_LANE_WIDTH:
+            openings.setdefault(key, []).append((neighbours[0], True))
+            predecessors[key] = list(predecessors[neighbours[0]])
+            for p in predecessors[key]:
+                successors[p].append(key)
+        if not successors[key] and width[-1] < MIN_LANE_WIDTH:
+            openings.setdefault(key, []).append((neighbours[0], False))
+            successors[key] = list(successors[neighbours[0]])
+            for s in successors[key]:
+                predecessors[s].append(key)
+    return all_successors, all_predecessors, is_lane, predecessors, successors, openings
