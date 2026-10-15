@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import IO, Iterator, Optional, Union
 
 from py123d.datatypes import BaseMapObject, StopZoneType
 from py123d.datatypes.metadata.map_metadata import MapMetadata
@@ -37,13 +37,15 @@ class OpenDriveMapParser(BaseMapParser):
         yield from iter_xodr_map_objects(self._xodr_path)
 
 
-def iter_xodr_map_objects(xodr_file: Path) -> Iterator[BaseMapObject]:
+def iter_xodr_map_objects(xodr_file: Union[Path, IO[bytes]]) -> Iterator[BaseMapObject]:
     """Yields all map objects extracted from an OpenDRIVE (.xodr) file.
 
-    :param xodr_file: Path to the OpenDRIVE (.xodr or .xodr.gz) file.
+    :param xodr_file: Path to the OpenDRIVE (.xodr or .xodr.gz) file, or the file opened in binary mode (then no
+        CARLA town data is applied).
     """
+    town = xodr_file.name.split(".")[0] if isinstance(xodr_file, Path) else None
     roads, junctions, controllers = load_xodr(xodr_file)
-    speed_signs = load_speed_signs(xodr_file)
+    speed_signs = load_speed_signs(town)
     split_sections_at_speed_signs(roads, speed_signs)
     lanes, sampled, raised, curb_lanes = collect_lanes(roads)
     all_successors, all_predecessors, is_lane, predecessors, successors, openings = collect_topology(
@@ -57,7 +59,7 @@ def iter_xodr_map_objects(xodr_file: Path) -> Iterator[BaseMapObject]:
     crosswalk_tree, painted_stop_lines, painted_tree, painted_directions = yield from iter_crosswalks(roads)
     stop_lines = collect_stop_lines(roads, junctions, controllers, lanes, all_successors, all_predecessors)
     # NOTE: On CARLA towns, CARLA's own stop and yield signs replace the OpenDRIVE ones and the painted stop lines.
-    carla_signs = load_stop_signs(xodr_file)
+    carla_signs = load_stop_signs(town)
     if carla_signs is not None:
         stop_lines = {k: v for k, v in stop_lines.items() if v[0] == StopZoneType.TRAFFIC_LIGHT}
     yield from iter_stop_zones(
@@ -72,5 +74,5 @@ def iter_xodr_map_objects(xodr_file: Path) -> Iterator[BaseMapObject]:
         painted_directions,
         carla_signs or [],
     )
-    yield from iter_static_objects(load_static_objects(xodr_file))
+    yield from iter_static_objects(load_static_objects(town))
     yield from iter_road_surfaces(roads, lanes, raised, curb_lanes, curbs, groups)

@@ -16,13 +16,13 @@ _DEFAULT_SPEED_LIMIT: Final[float] = 30.0 / 3.6  # [m/s], CARLA limit of a vehic
 _MIN_SECTION_LENGTH: Final[float] = 5.0  # [m], signs closer than this to a lane section border act from that border
 
 
-def load_speed_signs(xodr_file: Path) -> Optional[List[Tuple[int, int, float, float]]]:
+def load_speed_signs(town: Optional[str]) -> Optional[List[Tuple[int, int, float, float]]]:
     """Loads the speed signs CARLA places on a town map.
 
-    :param xodr_file: Path to the OpenDRIVE (.xodr or .xodr.gz) file.
+    :param town: Town name, i.e. the OpenDRIVE file name without suffixes.
     :return: (road id, lane id, s, limit in m/s) per lane a sign acts on, None for maps without exported signs.
     """
-    signs = json.loads(_SPEED_SIGNS_FILE.read_text()).get(xodr_file.name.split(".")[0])
+    signs = json.loads(_SPEED_SIGNS_FILE.read_text()).get(town)
     return None if signs is None else [(int(r), int(i), float(s), float(kmh) / 3.6) for r, i, s, kmh in signs]
 
 

@@ -13,13 +13,13 @@ from py123d.geometry.polyline import Polyline3D
 _STATIC_OBJECTS_FILE: Final[Path] = Path(__file__).parents[1] / "carla_maps" / "static_objects.json"
 
 
-def load_static_objects(xodr_file: Path) -> Optional[List[List[Any]]]:
+def load_static_objects(town: Optional[str]) -> Optional[List[List[Any]]]:
     """Loads the static objects CARLA places on a town map.
 
-    :param xodr_file: Path to the OpenDRIVE (.xodr or .xodr.gz) file.
+    :param town: Town name, i.e. the OpenDRIVE file name without suffixes.
     :return: Static objects (see _STATIC_OBJECTS_FILE), None for maps without exported objects (no CARLA town).
     """
-    return json.loads(_STATIC_OBJECTS_FILE.read_text()).get(xodr_file.name.split(".")[0])
+    return json.loads(_STATIC_OBJECTS_FILE.read_text()).get(town)
 
 
 def iter_static_objects(objects: Optional[List[List[Any]]]) -> Iterator[StaticObject]:

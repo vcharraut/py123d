@@ -359,10 +359,10 @@ def iter_stop_zones(
                 )
 
 
-def load_stop_signs(xodr_file: Path) -> Optional[List[List[Any]]]:
+def load_stop_signs(town: Optional[str]) -> Optional[List[List[Any]]]:
     """Loads the stop and yield signs CARLA places on a town map.
 
-    :param xodr_file: Path to the OpenDRIVE (.xodr or .xodr.gz) file.
+    :param town: Town name, i.e. the OpenDRIVE file name without suffixes.
     :return: Signs (see _CARLA_SIGNS_FILE), None for maps without exported signs.
     """
-    return json.loads(_CARLA_SIGNS_FILE.read_text()).get(xodr_file.name.split(".")[0])
+    return json.loads(_CARLA_SIGNS_FILE.read_text()).get(town)
