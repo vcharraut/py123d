@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Iterator, Optional
 
-from py123d.datatypes import BaseMapObject
+from py123d.datatypes import BaseMapObject, StopZoneType
 from py123d.datatypes.metadata.map_metadata import MapMetadata
 from py123d.parser.base_dataset_parser import BaseMapParser
 from py123d.parser.opendrive.utils.collection import collect_lanes, collect_topology
@@ -14,7 +14,7 @@ from py123d.parser.opendrive.utils.speed_sign_helper import (
     load_speed_signs,
     split_sections_at_speed_signs,
 )
-from py123d.parser.opendrive.utils.stop_zone_helper import iter_stop_zones
+from py123d.parser.opendrive.utils.stop_zone_helper import iter_stop_zones, load_stop_signs
 from py123d.parser.opendrive.utils.surface_helper import iter_road_surfaces
 from py123d.parser.opendrive.xodr_parser.opendrive import load_xodr
 
@@ -55,6 +55,10 @@ def iter_xodr_map_objects(xodr_file: Path) -> Iterator[BaseMapObject]:
     curbs = yield from iter_road_lines(roads, sampled, raised)
     crosswalk_tree, painted_stop_lines, painted_tree, painted_directions = yield from iter_crosswalks(roads)
     stop_lines = collect_stop_lines(roads, junctions, controllers, lanes, all_successors, all_predecessors)
+    # NOTE: On CARLA towns, CARLA's own stop and yield signs replace the OpenDRIVE ones and the painted stop lines.
+    carla_signs = load_stop_signs(xodr_file)
+    if carla_signs is not None:
+        stop_lines = {k: v for k, v in stop_lines.items() if v[0] == StopZoneType.TRAFFIC_LIGHT}
     yield from iter_stop_zones(
         roads,
         lanes,
@@ -62,8 +66,9 @@ def iter_xodr_map_objects(xodr_file: Path) -> Iterator[BaseMapObject]:
         all_successors,
         stop_lines,
         crosswalk_tree,
-        painted_stop_lines,
+        painted_stop_lines if carla_signs is None else [],
         painted_tree,
         painted_directions,
+        carla_signs or [],
     )
     yield from iter_road_surfaces(roads, lanes, raised, curb_lanes, curbs, groups)
