@@ -13,6 +13,7 @@ from py123d.datatypes import (
     IntersectionType,
     RoadEdge,
     RoadEdgeType,
+    Shoulder,
     Walkway,
 )
 from py123d.geometry.polyline import Polyline3D
@@ -21,7 +22,7 @@ from py123d.parser.utils.map_utils.road_edge.road_edge_2d_utils import split_lin
 
 _SURFACE_TYPES: Final[Dict[str, Type[BaseMapObject]]] = {
     "parking": Carpark,
-    "shoulder": GenericDrivable,
+    "shoulder": Shoulder,
     "border": GenericDrivable,
     "bidirectional": GenericDrivable,
     "restricted": GenericDrivable,
@@ -285,8 +286,8 @@ def iter_road_surfaces(
             object_id=n, road_edge_type=RoadEdgeType.ROAD_EDGE_BOUNDARY, polyline=Polyline3D.from_linestring(edge)
         )
 
-    # NOTE: Generic drivables cover the whole road surface: every road-level lane (driving,
-    # biking and parking lanes included, overlapping their Lane / Carpark) and the filled holes.
+    # NOTE: Generic drivables cover the whole road surface: every road-level lane (driving, biking, parking and
+    # shoulder lanes included, overlapping their Lane / Carpark / Shoulder) and the filled holes.
     for key in surface_keys:
         if _SURFACE_TYPES.get(lanes[key]["type"]) is not GenericDrivable:
             outline = np.vstack([lanes[key]["inner"], lanes[key]["outer"][::-1], lanes[key]["inner"][:1]])

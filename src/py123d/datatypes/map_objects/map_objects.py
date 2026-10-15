@@ -651,6 +651,37 @@ class GenericDrivable(BaseMapSurfaceObject):
         return MapLayer.GENERIC_DRIVABLE
 
 
+class Shoulder(BaseMapSurfaceObject):
+    """Class representing a shoulder surface in a map.
+    Shoulders are adjacent to lanes and may or may not be drivable, depending on the dataset.
+    """
+
+    __slots__ = ()
+
+    def __init__(
+        self,
+        object_id: MapObjectIDType,
+        outline: Optional[Union[Polyline2D, Polyline3D]] = None,
+        shapely_polygon: Optional[geom.Polygon] = None,
+    ):
+        """Initialize a Shoulder instance.
+
+        Notes
+        -----
+        Either outline or shapely_polygon must be provided.
+
+        :param object_id: The ID of the shoulder.
+        :param outline: The outline of the shoulder, defaults to None.
+        :param shapely_polygon: The Shapely polygon representation of the shoulder, defaults to None.
+        """
+        super().__init__(object_id, outline, shapely_polygon)
+
+    @property
+    def layer(self) -> MapLayer:
+        """The :class:`~py123d.datatypes.MapLayer` of the map object."""
+        return MapLayer.SHOULDER
+
+
 class StopZone(BaseMapSurfaceObject):
     """Class representing a stop zone in a map."""
 
