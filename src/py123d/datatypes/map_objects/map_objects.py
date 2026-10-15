@@ -37,6 +37,7 @@ class Lane(BaseMapSurfaceObject):
         "_predecessor_ids",
         "_successor_ids",
         "_speed_limit_mps",
+        "_sign_speed_limit_mps",
         "_map_api",
     )
 
@@ -56,6 +57,7 @@ class Lane(BaseMapSurfaceObject):
         outline: Optional[Union[Polyline2D, Polyline3D]] = None,
         shapely_polygon: Optional[geom.Polygon] = None,
         map_api: Optional["MapAPI"] = None,
+        sign_speed_limit_mps: Optional[float] = None,
     ) -> None:
         """Initialize a :class:`Lane` instance.
 
@@ -80,6 +82,8 @@ class Lane(BaseMapSurfaceObject):
         :param outline: The outline of the lane, defaults to None.
         :param shapely_polygon: The Shapely polygon representation of the lane, defaults to None.
         :param map_api: The MapAPI instance for accessing map objects, defaults to None.
+        :param sign_speed_limit_mps: The speed limit posted by speed signs in meters per second (the limit of the
+            last sign passed), defaults to None.
         :raises TypeError: If polylines are not all the same type (all 2D or all 3D).
         """
         polyline_types = {type(left_boundary), type(right_boundary), type(centerline)}
@@ -111,6 +115,7 @@ class Lane(BaseMapSurfaceObject):
         self._predecessor_ids = predecessor_ids
         self._successor_ids = successor_ids
         self._speed_limit_mps = speed_limit_mps
+        self._sign_speed_limit_mps = sign_speed_limit_mps
         self._map_api = map_api
 
     @property
@@ -270,6 +275,11 @@ class Lane(BaseMapSurfaceObject):
         else:
             speed_limit = float(self._speed_limit_mps)
         return speed_limit
+
+    @property
+    def sign_speed_limit_mps(self) -> Optional[float]:
+        """The speed limit posted by speed signs in meters per second."""
+        return self._sign_speed_limit_mps
 
     @property
     def trimesh_mesh(self) -> Trimesh:

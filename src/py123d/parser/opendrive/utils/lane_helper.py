@@ -17,6 +17,7 @@ def iter_lanes_and_lane_groups(
     predecessors: Dict[str, List[str]],
     successors: Dict[str, List[str]],
     openings: Dict[str, List[Tuple[str, bool]]],
+    sign_speed_limits: Dict[str, Optional[float]],
 ) -> Generator[BaseMapObject, None, Dict[str, List[str]]]:
     """Yields lanes and lane groups: one group per road, section and side, lanes ordered inner to outer.
 
@@ -25,6 +26,7 @@ def iter_lanes_and_lane_groups(
     :param predecessors: Predecessors of each py123d lane.
     :param successors: Successors of each py123d lane.
     :param openings: Driving neighbour each entry / exit lane opens from or closes into (see collect_topology).
+    :param sign_speed_limits: Speed limit from the speed signs per py123d lane (see collect_sign_speed_limits).
     :return: Lane ids per lane group id, returned once all objects are yielded.
     """
 
@@ -77,6 +79,7 @@ def iter_lanes_and_lane_groups(
                 predecessor_ids=predecessors[key],
                 successor_ids=successors[key],
                 speed_limit_mps=lane["speed"],
+                sign_speed_limit_mps=sign_speed_limits[key],
             )
         first = lanes[keys[0]]
         yield LaneGroup(

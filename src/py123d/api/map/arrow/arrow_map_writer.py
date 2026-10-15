@@ -117,6 +117,7 @@ class ArrowMapWriter(BaseMapWriter):
         self._map_data[MapLayer.LANE]["predecessor_ids"].append(lane.predecessor_ids)
         self._map_data[MapLayer.LANE]["successor_ids"].append(lane.successor_ids)
         self._map_data[MapLayer.LANE]["speed_limit_mps"].append(lane.speed_limit_mps)
+        self._map_data[MapLayer.LANE]["sign_speed_limit_mps"].append(lane.sign_speed_limit_mps)
 
     def _write_lane_group(self, lane_group: LaneGroup) -> None:
         self._write_surface_layer(MapLayer.LANE_GROUP, lane_group)
@@ -205,6 +206,7 @@ class ArrowMapWriter(BaseMapWriter):
                     "predecessor_ids": self._map_data[MapLayer.LANE]["predecessor_ids"][idx],
                     "successor_ids": self._map_data[MapLayer.LANE]["successor_ids"][idx],
                     "speed_limit_mps": self._map_data[MapLayer.LANE]["speed_limit_mps"][idx],
+                    "sign_speed_limit_mps": self._map_data[MapLayer.LANE]["sign_speed_limit_mps"][idx],
                     "outline": self._map_data[MapLayer.LANE]["outline"][idx],
                 }
                 all_features.append(msgpack_encode_with_numpy(lane_dict))  # type: ignore

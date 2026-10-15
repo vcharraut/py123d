@@ -9,6 +9,11 @@ from py123d.parser.opendrive.utils.lane_helper import iter_lanes_and_lane_groups
 from py123d.parser.opendrive.utils.objects_helper import iter_crosswalks
 from py123d.parser.opendrive.utils.road_line_helper import iter_road_lines
 from py123d.parser.opendrive.utils.signal_helper import collect_stop_lines
+from py123d.parser.opendrive.utils.speed_sign_helper import (
+    collect_sign_speed_limits,
+    load_speed_signs,
+    split_sections_at_speed_signs,
+)
 from py123d.parser.opendrive.utils.stop_zone_helper import iter_stop_zones
 from py123d.parser.opendrive.utils.surface_helper import iter_road_surfaces
 from py123d.parser.opendrive.xodr_parser.opendrive import load_xodr
@@ -37,11 +42,16 @@ def iter_xodr_map_objects(xodr_file: Path) -> Iterator[BaseMapObject]:
     :param xodr_file: Path to the OpenDRIVE (.xodr or .xodr.gz) file.
     """
     roads, junctions, controllers = load_xodr(xodr_file)
+    speed_signs = load_speed_signs(xodr_file)
+    split_sections_at_speed_signs(roads, speed_signs)
     lanes, sampled, raised, curb_lanes = collect_lanes(roads)
     all_successors, all_predecessors, is_lane, predecessors, successors, openings = collect_topology(
         roads, junctions, lanes
     )
-    groups = yield from iter_lanes_and_lane_groups(lanes, is_lane, predecessors, successors, openings)
+    sign_speed_limits = collect_sign_speed_limits(roads, lanes, is_lane, all_successors, successors, speed_signs)
+    groups = yield from iter_lanes_and_lane_groups(
+        lanes, is_lane, predecessors, successors, openings, sign_speed_limits
+    )
     curbs = yield from iter_road_lines(roads, sampled, raised)
     crosswalk_tree, painted_stop_lines, painted_tree, painted_directions = yield from iter_crosswalks(roads)
     stop_lines = collect_stop_lines(roads, junctions, controllers, lanes, all_successors, all_predecessors)

@@ -299,6 +299,7 @@ class ArrowMapAPI(MapAPI):
                 predecessor_ids=lane_features["predecessor_ids"],
                 successor_ids=lane_features["successor_ids"],
                 speed_limit_mps=lane_features["speed_limit_mps"],
+                sign_speed_limit_mps=lane_features.get("sign_speed_limit_mps"),
                 outline=Polyline3D.from_array(lane_features["outline"], copy=False),
                 shapely_polygon=lane_polygon,
                 map_api=self,
