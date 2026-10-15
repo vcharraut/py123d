@@ -15,6 +15,7 @@ from py123d.parser.opendrive.utils.speed_sign_helper import (
     split_sections_at_speed_signs,
 )
 from py123d.parser.opendrive.utils.stop_zone_helper import iter_stop_zones, load_stop_signs
+from py123d.parser.opendrive.utils.static_object_helper import iter_static_objects, load_static_objects
 from py123d.parser.opendrive.utils.surface_helper import iter_road_surfaces
 from py123d.parser.opendrive.xodr_parser.opendrive import load_xodr
 
@@ -71,4 +72,5 @@ def iter_xodr_map_objects(xodr_file: Path) -> Iterator[BaseMapObject]:
         painted_directions,
         carla_signs or [],
     )
+    yield from iter_static_objects(load_static_objects(xodr_file))
     yield from iter_road_surfaces(roads, lanes, raised, curb_lanes, curbs, groups)

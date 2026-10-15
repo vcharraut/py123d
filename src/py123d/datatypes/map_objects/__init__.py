@@ -6,6 +6,7 @@ from py123d.datatypes.map_objects.map_layer_types import (
     RoadEdgeType,
     RoadLineType,
     SpeedBumpType,
+    StaticObjectType,
     StopZoneType,
 )
 from py123d.datatypes.map_objects.map_objects import (
@@ -19,6 +20,7 @@ from py123d.datatypes.map_objects.map_objects import (
     RoadLine,
     Shoulder,
     SpeedBump,
+    StaticObject,
     StopZone,
     Walkway,
 )
@@ -35,6 +37,7 @@ __all__ = [
     "RoadEdgeType",
     "RoadLineType",
     "SpeedBumpType",
+    "StaticObjectType",
     "StopZoneType",
     # Map objects
     "Carpark",
@@ -47,6 +50,7 @@ __all__ = [
     "RoadLine",
     "Shoulder",
     "SpeedBump",
+    "StaticObject",
     "StopZone",
     "Walkway",
 ]

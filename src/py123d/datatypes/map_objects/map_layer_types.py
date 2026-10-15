@@ -45,6 +45,9 @@ class MapLayer(SerialIntEnum):
     SHOULDER = 11
     """Shoulders (surface)."""
 
+    STATIC_OBJECT = 13
+    """Static objects vehicles collide with, e.g. barriers, poles or parked cars (surface: footprint box)."""
+
 
 class LaneType(SerialIntEnum):
     """Enum for different lane types.
@@ -137,6 +140,31 @@ class SpeedBumpType(SerialIntEnum):
 
     UNKNOWN = 0
     """Unknown speed bump type."""
+
+
+class StaticObjectType(SerialIntEnum):
+    """Enum for different static object types."""
+
+    UNKNOWN = 0
+    """Unknown static object type."""
+
+    BARRIER = 1
+    """Guard rails, fences, walls and crash barrels."""
+
+    POLE = 2
+    """Poles, including those of traffic signs and traffic lights."""
+
+    VEHICLE = 3
+    """Parked vehicles that are part of the map."""
+
+    VEGETATION = 4
+    """Trees and bushes."""
+
+    BUILDING = 5
+    """Buildings and bridge structures."""
+
+    OTHER = 6
+    """Other props, e.g. benches, bins or bus stops."""
 
 
 class RoadEdgeType(SerialIntEnum):

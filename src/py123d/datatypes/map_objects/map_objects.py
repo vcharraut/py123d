@@ -14,6 +14,7 @@ from py123d.datatypes.map_objects.map_layer_types import (
     RoadEdgeType,
     RoadLineType,
     SpeedBumpType,
+    StaticObjectType,
     StopZoneType,
 )
 from py123d.datatypes.map_objects.utils import get_trimesh_from_boundaries
@@ -818,6 +819,56 @@ class RoadLine(BaseMapLineObject):
     def road_line_type(self) -> RoadLineType:
         """The type of road edge, according to :class:`~py123d.datatypes.RoadLineType`."""
         return self._road_line_type
+
+
+class StaticObject(BaseMapSurfaceObject):
+    """Class representing a static object of a map that vehicles collide with, e.g. a barrier, pole or parked car.
+
+    Notes
+    -----
+    The outline is the footprint box of the object at ground level. Currently only available from CARLA towns.
+    """
+
+    __slots__ = ("_height", "_static_object_type")
+
+    def __init__(
+        self,
+        object_id: MapObjectIDType,
+        outline: Optional[Union[Polyline2D, Polyline3D]] = None,
+        shapely_polygon: Optional[geom.Polygon] = None,
+        height: float = 0.0,
+        static_object_type: StaticObjectType = StaticObjectType.UNKNOWN,
+    ):
+        """Initialize a StaticObject instance.
+
+        Notes
+        -----
+        Either outline or shapely_polygon must be provided.
+
+        :param object_id: The ID of the static object.
+        :param outline: The footprint of the static object at ground level, defaults to None.
+        :param shapely_polygon: The Shapely polygon representation of the footprint, defaults to None.
+        :param height: The height of the static object above ground in meters, defaults to 0.0.
+        :param static_object_type: The type of the static object, defaults to ``StaticObjectType.UNKNOWN``.
+        """
+        super().__init__(object_id, outline, shapely_polygon)
+        self._height = height
+        self._static_object_type = static_object_type
+
+    @property
+    def layer(self) -> MapLayer:
+        """The :class:`~py123d.datatypes.MapLayer` of the map object."""
+        return MapLayer.STATIC_OBJECT
+
+    @property
+    def height(self) -> float:
+        """The height of the static object above ground in meters."""
+        return self._height
+
+    @property
+    def static_object_type(self) -> StaticObjectType:
+        """The type of the static object."""
+        return self._static_object_type
 
 
 class SpeedBump(BaseMapSurfaceObject):
