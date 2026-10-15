@@ -37,9 +37,6 @@ parser:
   # PY123D_DATA_ROOT when changing this for scenes that were already converted.
   map_source: clip_gt_or_xodr
   xodr_member: map.xodr
-  xodr_interpolation_step_size: 1.0
-  xodr_connection_distance_threshold: 0.1
-  xodr_internal_only: true
 
   # Only used when the map is read from map.xodr. 'world_base' derives the alignment
   # from rig_trajectories.json's world<-base ECEF pose. 'pose_record' instead anchors

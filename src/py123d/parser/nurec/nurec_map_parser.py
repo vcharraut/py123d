@@ -511,9 +511,6 @@ class NuRecMapParser(BaseMapParser):
         log_name: Optional[str] = None,
         map_source: str = "clip_gt_or_xodr",
         xodr_member: str = "map.xodr",
-        xodr_interpolation_step_size: float = 1.0,
-        xodr_connection_distance_threshold: float = 0.1,
-        xodr_internal_only: bool = True,
         alignment_enabled: bool = True,
         alignment_source: str = "world_base",
         alignment_rig_member: str = "rig_trajectories.json",
@@ -536,9 +533,6 @@ class NuRecMapParser(BaseMapParser):
         self._log_name = log_name
         self._map_source = map_source
         self._xodr_member = xodr_member
-        self._xodr_interpolation_step_size = xodr_interpolation_step_size
-        self._xodr_connection_distance_threshold = xodr_connection_distance_threshold
-        self._xodr_internal_only = xodr_internal_only
         self._alignment_enabled = alignment_enabled
         self._alignment_source = alignment_source
         self._alignment_rig_member = alignment_rig_member
