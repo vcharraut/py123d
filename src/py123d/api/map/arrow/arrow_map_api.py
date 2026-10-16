@@ -483,8 +483,6 @@ class ArrowMapAPI(MapAPI):
                 shapely_polygon=stop_zone_polygon,
                 lane_ids=stop_zone_features.get("lane_ids", []),
                 intersection_id=stop_zone_features.get("intersection_id"),
-                signal_group_id=stop_zone_features.get("signal_group_id"),
-                signal_sequence=stop_zone_features.get("signal_sequence"),
                 phase_idx=stop_zone_features.get("phase_idx"),
             )
         return stop_zone

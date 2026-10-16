@@ -691,14 +691,7 @@ class Shoulder(BaseMapSurfaceObject):
 class StopZone(BaseMapSurfaceObject):
     """Class representing a stop zone in a map."""
 
-    __slots__ = (
-        "_stop_zone_type",
-        "_lane_ids",
-        "_intersection_id",
-        "_signal_group_id",
-        "_signal_sequence",
-        "_phase_idx",
-    )
+    __slots__ = ("_stop_zone_type", "_lane_ids", "_intersection_id", "_phase_idx")
 
     def __init__(
         self,
@@ -708,8 +701,6 @@ class StopZone(BaseMapSurfaceObject):
         shapely_polygon: Optional[geom.Polygon] = None,
         lane_ids: Optional[Sequence[MapObjectIDType]] = None,
         intersection_id: Optional[MapObjectIDType] = None,
-        signal_group_id: Optional[MapObjectIDType] = None,
-        signal_sequence: Optional[int] = None,
         phase_idx: Optional[int] = None,
     ):
         """Initialize a StopZone instance.
@@ -729,19 +720,13 @@ class StopZone(BaseMapSurfaceObject):
         :param outline: The outline of the stop zone, defaults to None.
         :param shapely_polygon: The Shapely polygon representation of the stop zone, defaults to None.
         :param lane_ids: List of lane IDs this stop zone controls, defaults to None.
-        :param intersection_id: ID of the intersection this stop zone belongs to, defaults to None.
-        :param signal_group_id: ID of the signal group; stop zones of one group always share the same signal state,
-            defaults to None.
-        :param signal_sequence: Position of the signal group in the intersection's signal cycle (phase order),
-            defaults to None.
+        :param intersection_id: ID of the intersection whose signal controller cycles this stop zone, defaults to None.
         :param phase_idx: Phase index of this stop zone within the intersection's signal cycle, defaults to None.
         """
         super().__init__(object_id, outline, shapely_polygon)
         self._stop_zone_type = stop_zone_type
         self._lane_ids = list(lane_ids) if lane_ids is not None else []
         self._intersection_id = intersection_id
-        self._signal_group_id = signal_group_id
-        self._signal_sequence = signal_sequence
         self._phase_idx = phase_idx
 
     @property
@@ -761,18 +746,8 @@ class StopZone(BaseMapSurfaceObject):
 
     @property
     def intersection_id(self) -> Optional[MapObjectIDType]:
-        """ID of the intersection this stop zone belongs to, if any."""
+        """ID of the intersection whose signal controller cycles this stop zone, if any."""
         return self._intersection_id
-
-    @property
-    def signal_group_id(self) -> Optional[MapObjectIDType]:
-        """ID of the signal group, stop zones of one group always share the same signal state."""
-        return self._signal_group_id
-
-    @property
-    def signal_sequence(self) -> Optional[int]:
-        """Position of the signal group in the intersection's signal cycle (phase order), if known."""
-        return self._signal_sequence
 
     @property
     def phase_idx(self) -> Optional[int]:

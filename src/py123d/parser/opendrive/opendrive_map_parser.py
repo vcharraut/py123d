@@ -8,7 +8,7 @@ from py123d.parser.opendrive.utils.collection import collect_lanes, collect_topo
 from py123d.parser.opendrive.utils.lane_helper import iter_lanes_and_lane_groups
 from py123d.parser.opendrive.utils.objects_helper import iter_crosswalks
 from py123d.parser.opendrive.utils.road_line_helper import iter_road_lines
-from py123d.parser.opendrive.utils.signal_helper import collect_stop_lines
+from py123d.parser.opendrive.utils.signal_helper import collect_stop_lines, iter_traffic_lights
 from py123d.parser.opendrive.utils.speed_sign_helper import (
     collect_sign_speed_limits,
     load_speed_signs,
@@ -62,7 +62,7 @@ def iter_xodr_map_objects(xodr_file: Union[Path, IO[bytes]]) -> Iterator[BaseMap
     carla_signs = load_stop_signs(town)
     if carla_signs is not None:
         stop_lines = {k: v for k, v in stop_lines.items() if v[0] == StopZoneType.TRAFFIC_LIGHT}
-    yield from iter_stop_zones(
+    signal_zones = yield from iter_stop_zones(
         roads,
         lanes,
         is_lane,
@@ -74,5 +74,6 @@ def iter_xodr_map_objects(xodr_file: Union[Path, IO[bytes]]) -> Iterator[BaseMap
         painted_directions,
         carla_signs or [],
     )
+    yield from iter_traffic_lights(roads, controllers, lanes, signal_zones)
     yield from iter_static_objects(load_static_objects(town))
     yield from iter_road_surfaces(roads, lanes, raised, curb_lanes, curbs, groups)

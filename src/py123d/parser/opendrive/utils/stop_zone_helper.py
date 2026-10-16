@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, Final, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Final, Generator, List, Optional, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -40,13 +40,13 @@ def iter_stop_zones(
     lanes: Dict[str, Dict[str, Any]],
     is_lane: Dict[str, None],
     all_successors: Dict[str, List[str]],
-    stop_lines: Dict[Tuple[str, bool], Tuple[StopZoneType, Optional[str], Optional[int]]],
+    stop_lines: Dict[Tuple[str, bool], Tuple[StopZoneType, Optional[str], Optional[int], List[str]]],
     crosswalk_tree: shapely.STRtree,
     painted_stop_lines: List[shapely.Polygon],
     painted_tree: shapely.STRtree,
     painted_directions: npt.NDArray[np.float64],
     carla_signs: List[List[Any]],
-) -> Iterator[BaseMapObject]:
+) -> Generator[BaseMapObject, None, Dict[str, List[StopZone]]]:
     """Yields stop zones of signal stop lines, CARLA stop / yield signs and painted stop lines without a signal.
 
     The stop lines of one traffic-light signal group or one CARLA sign that lie side by side are merged into one stop
@@ -56,13 +56,14 @@ def iter_stop_zones(
     :param lanes: Lanes, keyed by lane id (see collect_lanes).
     :param is_lane: Ordered ids of py123d lanes.
     :param all_successors: Successors over all lanes.
-    :param stop_lines: Stop zone type, signal group id and signal sequence per (lane id, stop line at the lane start)
-        (see collect_stop_lines).
+    :param stop_lines: Stop zone type, signal group id, signal sequence and signal ids per (lane id, stop line at the
+        lane start) (see collect_stop_lines).
     :param crosswalk_tree: Tree of the crosswalk polygons.
     :param painted_stop_lines: Painted stop line areas.
     :param painted_tree: Tree of the painted stop line areas.
     :param painted_directions: (n, 2) unit directions of the painted stop lines.
     :param carla_signs: CARLA stop and yield signs (see load_stop_signs), replacing the OpenDRIVE ones.
+    :return: Stop zones of each traffic-light signal, keyed by signal id, returned once all stop zones are yielded.
     """
 
     def section_range(lane: Dict[str, Any]) -> Tuple[float, float]:
@@ -106,8 +107,7 @@ def iter_stop_zones(
         s_stop: float,
         controlled: List[str],
         painted: bool = False,
-        signal_group_id: Optional[str] = None,
-        signal_sequence: Optional[int] = None,
+        phase_idx: Optional[int] = None,
     ) -> StopZone:
         # NOTE: The 0.5 m strip lies upstream of the stop position, across the full lane width (oriented along the
         # painted line if there is one). The controlled lanes start at the stop line (junction lanes), like
@@ -134,17 +134,16 @@ def iter_stop_zones(
             lane_ids=controlled,
             # NOTE: The controlled lanes are junction lanes, whose junction is the stop zone's intersection.
             intersection_id=lanes[controlled[0]]["junction"] if lanes[controlled[0]]["junction"] != -1 else None,
-            signal_group_id=signal_group_id,
-            signal_sequence=signal_sequence,
+            phase_idx=phase_idx,
         )
 
-    # NOTE: (lane id, stop line at the lane start, type, signal group, sequence, merge group, CARLA reach: range of
+    # NOTE: (lane id, stop line at the lane start, type, signal sequence, merge group, signal ids, CARLA reach: range of
     # distances of the line before the junction entry and the lane id and s of its last position, or None). CARLA signs
     # act on the approach lanes that reach them.
     traffic_light = StopZoneType.TRAFFIC_LIGHT
     entries = [
-        (key, at_start, zone_type, group, sequence, ("signal", group) if zone_type == traffic_light else None, None)
-        for (key, at_start), (zone_type, group, sequence) in stop_lines.items()
+        (key, at_start, zone_type, sequence, ("signal", group) if zone_type == traffic_light else None, signals, None)
+        for (key, at_start), (zone_type, group, sequence, signals) in stop_lines.items()
     ]
     for n, (kind, _, _, _, approaches) in enumerate(carla_signs):
         for road_id, lane_id, s, first, last, end_road, end_lane, end_s in approaches:
@@ -155,7 +154,7 @@ def iter_stop_zones(
             lo, hi = last + margin - _VEHICLE_HALF_LENGTH, first - margin - _VEHICLE_HALF_LENGTH
             reach = (lo, hi, last, first, end_key, end_s) if kind == "stop" and end_key in lanes else None
             if key in is_lane:
-                entries.append((key, False, _CARLA_SIGN_TYPES[kind], None, None, ("sign", n), reach))
+                entries.append((key, False, _CARLA_SIGN_TYPES[kind], None, ("sign", n), [], reach))
 
     predecessors = {}
     for key, nexts in all_successors.items():
@@ -203,8 +202,8 @@ def iter_stop_zones(
             walked += steps[-1]
         return None
 
-    signal_zones, merge_groups = [], {}
-    for key, at_start, zone_type, signal_group_id, signal_sequence, merge_group, reach in entries:
+    signal_zones, merge_groups, signals_of = [], {}, {}
+    for key, at_start, zone_type, signal_sequence, merge_group, signal_ids, reach in entries:
         controlled = [key] if at_start else [s for s in all_successors[key] if s in is_lane] or [key]
         # NOTE: The vehicle stops at the painted stop line (on the approach or the first junction lane), else at the
         # junction entry (CARLA BasicAgent stop waypoint, and CARLA's red-light line). Only OpenDRIVE stop and yield
@@ -282,10 +281,10 @@ def iter_stop_zones(
             s_stop,
             controlled,
             painted,
-            signal_group_id,
             signal_sequence,
         )
         signal_zones.append(zone.shapely_polygon)
+        signals_of[zone.object_id] = signal_ids
         if merge_group is not None:
             merge_groups.setdefault(merge_group, []).append(zone)
             continue
@@ -301,35 +300,42 @@ def iter_stop_zones(
         for group, zones in merge_groups.items()
     }
     merged_lines = [
-        (merge_groups[group], line)
+        (group, merge_groups[group], line)
         for group, area in closed.items()
         for line in shapely.get_parts(area)
         if not line.is_empty
     ]
-    for zones, line in merged_lines:
+    grouped = []
+    for group, zones, line in merged_lines:
         members = [zone for zone in zones if line.intersects(zone.shapely_polygon.representative_point())]
         if len(members) == 1:
-            yield members[0]
+            grouped.append((group, members[0], members))
             continue
         corners = np.vstack([zone.outline.array for zone in members])
         xy = np.array(line.simplify(0.01).exterior.coords)
         heights = corners[np.argmin(np.linalg.norm(xy[:, None] - corners[None, :, :2], axis=2), axis=1), 2]
-        yield StopZone(
+        merged = StopZone(
             object_id=members[0].object_id,
             stop_zone_type=members[0].stop_zone_type,
             outline=Polyline3D.from_array(np.column_stack([xy, heights])),
             lane_ids=list(dict.fromkeys(lane_id for zone in members for lane_id in zone.lane_ids)),
             intersection_id=members[0].intersection_id,
-            signal_group_id=members[0].signal_group_id,
-            signal_sequence=members[0].signal_sequence,
+            phase_idx=members[0].phase_idx,
         )
+        grouped.append((group, merged, members))
     # NOTE: Zero-depth strips (stop position clipped at the lane end) vanish in the closing and stay as they are.
-    yield from (
-        zone
+    grouped += [
+        (group, zone, [zone])
         for group, zones in merge_groups.items()
         for zone in zones
         if not closed[group].intersects(zone.shapely_polygon.representative_point())
-    )
+    ]
+    yield from (zone for _, zone, _ in grouped)
+    zones_of_signal = {}
+    for (kind, _), zone, members in grouped:
+        signal_ids = [s for member in members for s in signals_of[member.object_id]] if kind == "signal" else []
+        for signal_id in dict.fromkeys(signal_ids):
+            zones_of_signal.setdefault(signal_id, []).append(zone)
 
     # NOTE: Painted stop lines without a signal are stop lines as well.
     signal_tree = shapely.STRtree(signal_zones)
@@ -357,6 +363,7 @@ def iter_stop_zones(
                     controlled,
                     painted=True,
                 )
+    return zones_of_signal
 
 
 def load_stop_signs(town: Optional[str]) -> Optional[List[List[Any]]]:
