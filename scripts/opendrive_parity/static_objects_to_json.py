@@ -24,20 +24,9 @@ def cells(geometry):
     x0, y0, x1, y1 = geometry.bounds
     grid = [shapely.box(x, y, x + CELL, y + CELL) for x in np.arange(x0, x1, CELL) for y in np.arange(y0, y1, CELL)]
     pieces = shapely.get_parts(shapely.intersection(geometry, grid))
-    return [p for p in pieces if p.geom_type == "Polygon" and p.area >= MIN_AREA]
-
-
-def footprint(piece):
-    # NOTE: Box sides shorter than the ray spacing (slices cut off at a cell edge) widen to it around the box centre.
-    corners = shapely.get_coordinates(shapely.minimum_rotated_rectangle(piece))[:4]
-    a, b = corners[1] - corners[0], corners[3] - corners[0]
-    na, nb = np.linalg.norm(a), np.linalg.norm(b)
-    if min(na, nb) >= STEP:
-        return corners
-    ua = a / na if na > 0 else np.array([b[1], -b[0]]) / nb
-    ha, hb = ua * max(na, STEP) / 2, np.array([-ua[1], ua[0]]) * max(nb, STEP) / 2
-    centre = corners.mean(axis=0)
-    return np.array([centre - ha - hb, centre + ha - hb, centre + ha + hb, centre - ha + hb])
+    # NOTE: Pieces thinner than the ray spacing are slices cut off at a cell edge, not objects.
+    sides = lambda p: np.linalg.norm(np.diff(shapely.get_coordinates(shapely.minimum_rotated_rectangle(p))[:3], axis=0), axis=1)
+    return [p for p in pieces if p.geom_type == "Polygon" and p.area >= MIN_AREA and sides(p).min() >= STEP]
 
 
 for path in sorted(p for p in Path(sys.argv[1]).glob("Town*.json") if not p.name.endswith(".boxes.json")):
@@ -76,7 +65,7 @@ for path in sorted(p for p in Path(sys.argv[1]).glob("Town*.json") if not p.name
         name, (_, label, _, top) = names[i], boxes[names[i]]
         geometry = shapely.union_all([p for p, _ in pieces])
         for k, piece in enumerate(cells(geometry)):
-            corners = footprint(piece)
+            corners = shapely.get_coordinates(shapely.minimum_rotated_rectangle(piece))[:4]
             box = np.round(np.c_[corners, np.full(4, z)], 2)
             objects.append([f"{name}_{k}", TYPES.get(label, "OTHER"), round(top - z, 2), box.tolist()])
     # NOTE: Hits outside every box (meshes without an own bounding box, e.g. bridge parts) keep their finder's label.
@@ -84,7 +73,7 @@ for path in sorted(p for p in Path(sys.argv[1]).glob("Town*.json") if not p.name
         finders = shapely.STRtree([p for p, *_ in parts])
         for n, piece in enumerate(cells(shapely.union_all([p for p, *_ in parts]))):
             _, z, label, height, finder = parts[int(finders.query(piece, predicate="intersects")[0])]
-            corners = footprint(piece)
+            corners = shapely.get_coordinates(shapely.minimum_rotated_rectangle(piece))[:4]
             box = np.round(np.c_[corners, np.full(4, z)], 2)
             objects.append([f"{finder}_rest_{n}", TYPES.get(label, "OTHER"), round(height, 2), box.tolist()])
     towns[path.stem] = objects

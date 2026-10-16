@@ -115,6 +115,8 @@ def iter_stop_zones(
         lane, (s0, s1) = lanes[key], section_range(lanes[key])
         upstream = -np.sign(0.5 - lane["id"]) * _STOP_LINE_DEPTH
         s_pair = np.clip(np.array([s_stop + upstream, s_stop]), s0, s1)
+        # NOTE: A stop position at the lane start has no lane upstream: the strip lies just downstream instead.
+        s_pair = s_pair if s_pair[0] != s_pair[1] else np.clip(np.array([s_stop - upstream, s_stop]), s0, s1)
         borders = eval_borders(roads[lane["road"]], lane["section"], s_pair)
         inner, outer = borders[lane["id"] - np.sign(lane["id"])], borders[lane["id"]]
         if painted:
