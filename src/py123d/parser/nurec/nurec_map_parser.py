@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 from typing_extensions import override
 
+from py123d.api.map.arrow.arrow_id_utils import ToIntMapping
 from py123d.datatypes import (
     BaseMapObject,
     Carpark,
@@ -722,24 +723,29 @@ class NuRecMapParser(BaseMapParser):
             f"Unsupported NuRec map alignment source: {self._alignment_source!r}. Use 'world_base' or 'pose_record'."
         )
 
-    def _iter_map_objects_clip_gt(self, archive: ZipFile) -> Iterator[BaseMapObject]:
-        """Map objects from the clipgt MADS layers of an archive that carries them."""
-        lane_rows = self._read_layer_rows(archive, "lane")
-        boundaries = self._read_layer(archive, "road_boundary")
-        relations = self._read_associations(archive)
-        crosswalks = self._read_layer(archive, "crosswalk")
-        gore_areas = self._read_layer(archive, "gore_area")
-        road_islands = self._read_layer(archive, "road_island")
-        wait_line_rows = self._read_layer_rows(archive, "wait_line")
-        lane_lines = self._read_layer(archive, "lane_line")
-        intersection_rows = self._read_layer_rows(archive, "intersection_area")
-        traffic_light_rows = self._read_layer_rows(archive, "traffic_light")
-        sign_categories = {
-            map_id: sign.get("category")
-            for map_id, sign in self._read_layer_rows(archive, "traffic_sign")
-            if map_id is not None
-        }
+    def get_traffic_light_lane_ids(self):
+        with ZipFile(self._usdz_path) as archive:
+            source = resolve_map_source(set(archive.namelist()), self._map_source, self._xodr_member)
+            if source is None:
+                return {}
+            if source == "xodr":
+                objects = list(iter_xodr_map_objects(io.BytesIO(archive.read(self._xodr_member))))
+                lane_ids = ToIntMapping.from_list([obj.object_id for obj in objects if isinstance(obj, Lane)])
+                return {
+                    str(obj.object_id): lane_ids.map_list(obj.lane_ids)
+                    for obj in objects
+                    if isinstance(obj, TrafficLight)
+                }
+            _, lane_ids = self._read_clipgt_lanes(archive)
+            relations = self._read_associations(archive)
+            return {
+                str(map_id): sorted(lane_ids[lane_id] for lane_id in related if lane_id in lane_ids)
+                for map_id, related in relations.light_lanes.items()
+                if map_id not in lane_ids
+            }
 
+    def _read_clipgt_lanes(self, archive):
+        lane_rows = self._read_layer_rows(archive, "lane")
         next_id = 0
 
         # A lane's successors and neighbours can appear later in the file, so ids
@@ -766,6 +772,26 @@ class NuRecMapParser(BaseMapParser):
                 else:
                     lane_id_by_map_id[map_id] = next_id
             next_id += 1
+        return parsed_lanes, lane_id_by_map_id
+
+    def _iter_map_objects_clip_gt(self, archive: ZipFile) -> Iterator[BaseMapObject]:
+        """Map objects from the clipgt MADS layers of an archive that carries them."""
+        parsed_lanes, lane_id_by_map_id = self._read_clipgt_lanes(archive)
+        boundaries = self._read_layer(archive, "road_boundary")
+        relations = self._read_associations(archive)
+        crosswalks = self._read_layer(archive, "crosswalk")
+        gore_areas = self._read_layer(archive, "gore_area")
+        road_islands = self._read_layer(archive, "road_island")
+        wait_line_rows = self._read_layer_rows(archive, "wait_line")
+        lane_lines = self._read_layer(archive, "lane_line")
+        intersection_rows = self._read_layer_rows(archive, "intersection_area")
+        traffic_light_rows = self._read_layer_rows(archive, "traffic_light")
+        sign_categories = {
+            map_id: sign.get("category")
+            for map_id, sign in self._read_layer_rows(archive, "traffic_sign")
+            if map_id is not None
+        }
+        next_id = len(parsed_lanes)
 
         succ_ids: Dict[int, List[int]] = {}
         pred_ids: Dict[int, List[int]] = {}

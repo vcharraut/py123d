@@ -137,7 +137,7 @@ conflicts = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-py123d = ["py.typed", "**/*.yaml", "**/*.yml", "**/*.proto", "**/*.xodr.gz", "parser/griffin/splits/*.json", "parser/opendrive/carla_maps/*.json"]
+py123d = ["py.typed", "**/*.yaml", "**/*.yml", "**/*.proto", "**/*.xodr.gz", "parser/griffin/splits/*.json", "parser/opendrive/carla_maps/*.json", "parser/nurec/pai-nurec-traffic-lights-annotations.csv"]
 
 [project.urls]
 "Homepage" = "https://github.com/kesai-labs/py123d"

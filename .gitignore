@@ -23,6 +23,7 @@
 *.arrow
 *.pkl
 *.csv
+!src/py123d/parser/nurec/pai-nurec-traffic-lights-annotations.csv
 *.log
 *.mp4
 exp/

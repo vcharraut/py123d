@@ -64,7 +64,7 @@ Available Modalities
      - Auto-labeled 3D cuboid tracks, interpolated onto the same 10 Hz grid as the ego poses. By default, positions are smoothed and tracks shorter than 3 s are dropped, as in NVIDIA's simulator (see Conversion). NuRec shares the Physical AI AV taxonomy (:class:`~py123d.parser.registry.PhysicalAIAVBoxDetectionLabel`). See :class:`~py123d.datatypes.BoxDetectionsSE3`.
    * - Traffic Lights
      - (✓)
-     - No per-timestep light states are recorded. The clipgt ``traffic_light`` boxes are converted to :class:`~py123d.datatypes.TrafficLight` objects with the lanes they control (``LIGHT_TO_LANE``), and light-controlled stopping points as :class:`~py123d.datatypes.StopZone`.
+     - Bundled CSV annotations supply per-timestep :class:`~py123d.datatypes.TrafficLightDetections` for annotated scenes (see Conversion). The clipgt ``traffic_light`` boxes are converted to :class:`~py123d.datatypes.TrafficLight` objects with the lanes they control (``LIGHT_TO_LANE``), and light-controlled stopping points as :class:`~py123d.datatypes.StopZone`.
    * - Cameras
      - X
      - The dataset ships no recorded camera frames. Views are rendered from the reconstruction.
@@ -138,6 +138,31 @@ Conversion
   export PY123D_DATA_ROOT=/path/to/py123d_data
 
   py123d-conversion dataset=nurec-curated
+
+Traffic light annotations are loaded automatically from
+``parser/nurec/pai-nurec-traffic-lights-annotations.csv``, bundled with the package.
+This also applies to the release-specific and streaming configs. To update existing
+converted logs:
+
+.. code-block:: bash
+
+  py123d-conversion dataset=nurec-curated force_log_conversion=true
+
+Use ``+dataset.parser.traffic_light_annotations_path=/absolute/path/annotations.csv``
+to supply a different CSV, or ``+dataset.parser.traffic_light_annotations_path=null``
+to disable traffic light states.
+
+The CSV's ``image_id`` identifies the scene, light and timestamp in microseconds;
+``Active Light Colour`` supplies its state. All confidence levels are included.
+``RED-YELLOW`` becomes ``RED`` and ``YELLOW/ORANGE`` becomes ``YELLOW``. Each light's
+most recent annotation is carried forward for at most 5 seconds, then becomes
+``UNKNOWN``. Frames before the first annotation are also ``UNKNOWN``.
+
+States are linked to the converted lanes through clipgt ``LIGHT_TO_LANE`` associations,
+or matching OpenDRIVE signal IDs when that map source is selected. Conflicting states
+from lights controlling the same lane become ``UNKNOWN``. Pictograms and confidence
+are not stored in the lane-state modality. Scenes without annotations, a map, or matching
+light-to-lane links emit no traffic light modality.
 
 NuRec ships as releases without official splits. ``dataset=nurec-curated`` converts the
 train and validation scenes curated for the `AlpaSim <https://github.com/NVlabs/alpasim>`_
@@ -299,8 +324,8 @@ Dataset Issues
 ~~~~~~~~~~~~~~
 
 - **No traffic-light states.** The map layers contain traffic-light geometry, but the
-  dataset records no per-timestep light states, so no traffic-light modality is emitted.
-  A converted map records where traffic must stop for a signal, but not the signal state.
+  dataset records no per-timestep light states. A traffic-light modality is emitted only
+  when the bundled or supplied CSV annotations can be linked to lanes (see Conversion).
 - **Some scenes carry no clipgt layers.** The whole ``26.04`` release carries clipgt. In
   ``26.01``, 184 of 916 scenes ship only ``map.xodr``, which is then converted instead through
   :mod:`py123d.parser.opendrive` and is less detailed than a clipgt map. NuRec's

@@ -27,6 +27,9 @@ from py123d.datatypes import (
     LogMetadata,
     MapMetadata,
     Timestamp,
+    TrafficLightDetection,
+    TrafficLightDetections,
+    TrafficLightStatus,
 )
 from py123d.geometry import BoundingBoxSE3, PoseSE3, Vector3D
 from py123d.parser.base_dataset_parser import BaseDatasetParser, BaseLogParser, BaseMapParser, ModalitiesSync
@@ -150,6 +153,7 @@ class NuRecParser(BaseDatasetParser):
         alignment_xy_origin_m: Optional[Tuple[float, float]] = None,
         alignment_z_origin: str = "world_base_altitude",
         alignment_z_origin_m: Optional[float] = None,
+        traffic_light_annotations_path=Path(__file__).with_name("pai-nurec-traffic-lights-annotations.csv"),
     ) -> None:
         """Initializes the NuRec parser.
 
@@ -183,6 +187,28 @@ class NuRecParser(BaseDatasetParser):
         self._downloader = downloader
         self._map_source = map_source
         self._xodr_member = xodr_member
+        self._traffic_light_annotations = {}
+        if traffic_light_annotations_path is not None:
+            annotations = pd.read_csv(traffic_light_annotations_path, usecols=["image_id", "Active Light Colour"])
+            identifiers = annotations["image_id"].str.extract(
+                r"^(?P<scene>.+)__tl_(?P<light_id>\d+)_step\d+_ts(?P<timestamp_us>\d+)\.jpg$"
+            )
+            annotations = identifiers.assign(
+                timestamp_us=identifiers["timestamp_us"].astype(np.int64),
+                status=annotations["Active Light Colour"]
+                .map(
+                    {
+                        "GREEN": TrafficLightStatus.GREEN,
+                        "YELLOW/ORANGE": TrafficLightStatus.YELLOW,
+                        "RED": TrafficLightStatus.RED,
+                        "RED-YELLOW": TrafficLightStatus.RED,
+                        "OFF": TrafficLightStatus.OFF,
+                        "UNKNOWN": TrafficLightStatus.UNKNOWN,
+                    }
+                )
+                .astype(np.int64),
+            )
+            self._traffic_light_annotations = {scene: rows for scene, rows in annotations.groupby("scene")}
         # Forwarded verbatim to every NuRecMapParser; see its docstring for what each controls.
         self._map_parser_kwargs: Dict[str, object] = dict(
             map_source=map_source,
@@ -241,6 +267,9 @@ class NuRecParser(BaseDatasetParser):
                 min_traffic_duration_us=self._min_traffic_duration_us,
                 smooth_track_positions=self._smooth_track_positions,
                 has_map=scene.has_map,
+                traffic_light_annotations=self._traffic_light_annotations.get(scene.name),
+                map_source=self._map_source,
+                xodr_member=self._xodr_member,
             )
             for scene in self._scenes
         ]
@@ -360,6 +389,9 @@ class NuRecLogParser(BaseLogParser):
         min_traffic_duration_us: int = 3_000_000,
         smooth_track_positions: bool = True,
         has_map: bool = True,
+        traffic_light_annotations=None,
+        map_source="clip_gt_or_xodr",
+        xodr_member="map.xodr",
     ) -> None:
         self._usdz_path = Path(usdz_path)
         self._split = split
@@ -368,6 +400,9 @@ class NuRecLogParser(BaseLogParser):
         self._smooth_track_positions = smooth_track_positions
         # AlpaSim drops tracks shorter than this within the scene window; 0 keeps all.
         self._min_traffic_duration_us = min_traffic_duration_us
+        self._traffic_light_annotations = traffic_light_annotations
+        self._map_source = map_source
+        self._xodr_member = xodr_member
 
     @property
     def _uuid(self) -> str:
@@ -425,6 +460,14 @@ class NuRecLogParser(BaseLogParser):
 
         # Uniform 10 Hz grid anchored at ts[1] - 100 ms; ts[0] is typically off-grid.
         frame_timestamps_us = _uniform_grid_us(rig_timestamps_us)
+        traffic_lights = {}
+        if self._traffic_light_annotations is not None and self._has_map:
+            map_parser = NuRecMapParser(
+                self._usdz_path, location=self._uuid, map_source=self._map_source, xodr_member=self._xodr_member
+            )
+            traffic_lights = _resample_traffic_lights(
+                self._traffic_light_annotations, map_parser.get_traffic_light_lane_ids(), frame_timestamps_us
+            )
 
         for timestamp_us in frame_timestamps_us:
             timestamp = Timestamp.from_us(timestamp_us)
@@ -452,8 +495,46 @@ class NuRecLogParser(BaseLogParser):
                         timestamp=timestamp,
                         metadata=NUREC_BOX_DETECTIONS_SE3_METADATA,
                     ),
-                ],
+                ]
+                + ([traffic_lights[timestamp_us]] if timestamp_us in traffic_lights else []),
             )
+
+
+def _resample_traffic_lights(annotations, light_lane_ids, frame_timestamps_us):
+    frames = np.asarray(frame_timestamps_us, dtype=np.int64)
+    samples = []
+    for light_id, rows in annotations.groupby("light_id"):
+        lane_ids = light_lane_ids.get(light_id, [])
+        if not lane_ids:
+            continue
+        rows = rows.sort_values("timestamp_us")
+        timestamps = rows["timestamp_us"].to_numpy()
+        indices = np.searchsorted(timestamps, frames, side="right") - 1
+        ages = frames - timestamps[indices]
+        statuses = np.where(
+            (indices >= 0) & (ages <= 5_000_000),
+            rows["status"].to_numpy()[indices],
+            int(TrafficLightStatus.UNKNOWN),
+        )
+        samples.append(
+            pd.DataFrame({"timestamp_us": frames, "status": statuses}).assign(lane_id=[lane_ids] * len(frames))
+        )
+    if not samples:
+        return {}
+    states = (
+        pd.concat(samples).explode("lane_id").groupby(["timestamp_us", "lane_id"])["status"].agg(["first", "nunique"])
+    )
+    states["status"] = states["first"].where(states["nunique"] == 1, int(TrafficLightStatus.UNKNOWN))
+    return {
+        timestamp_us: TrafficLightDetections(
+            detections=[
+                TrafficLightDetection(lane_id=int(row.lane_id), status=TrafficLightStatus(row.status))
+                for row in rows.itertuples()
+            ],
+            timestamp=Timestamp.from_us(int(timestamp_us)),
+        )
+        for timestamp_us, rows in states.reset_index().groupby("timestamp_us")
+    }
 
 
 def _read_required_json_member(archive: ZipFile, member: str, uuid: str) -> Dict:
