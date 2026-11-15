@@ -18,6 +18,18 @@ for town in towns:
     if not world.get_map().name.endswith(town):
         world = client.load_world(town)
     cmap = world.get_map()
+    # NOTE: On large maps (Town11, 12, 13) actors farther than actor_active_distance from the hero are dormant and not
+    # listed: a hero hovering with physics off and an unbounded distance keep every sign.
+    settings = world.get_settings()
+    settings.actor_active_distance = 1e6
+    world.apply_settings(settings)
+    hero_bp = world.get_blueprint_library().find("vehicle.tesla.model3")
+    hero_bp.set_attribute("role_name", "hero")
+    spawn = cmap.get_spawn_points()[0]
+    spawn.location.z += 150
+    hero = world.spawn_actor(hero_bp, spawn)
+    hero.set_simulate_physics(False)
+    world.wait_for_tick(); world.wait_for_tick()
 
     def affected(wp, centre, extent):
         if wp.transform.location.distance(centre) > PROXIMITY:
@@ -63,7 +75,8 @@ for town in towns:
                 dx, dy = extent.x * BOX_SCALE * i / 8, extent.y * BOX_SCALE * j / 8
                 p = carla.Location(centre.x + dx, centre.y + dy, centre.z)
                 wp = cmap.get_waypoint(p, project_to_road=True, lane_type=carla.LaneType.Driving)
-                if wp is not None and wp.transform.location.distance(p) < wp.lane_width / 2:
+                # NOTE: Trigger centres lie up to 2.2 m below the road (Town12, Town15): the lane is matched in 2D.
+                if wp is not None and wp.transform.location.distance_2d(p) < wp.lane_width / 2:
                     lanes.setdefault((wp.road_id, wp.lane_id), wp)
         approaches = {}
         for wp in lanes.values():
@@ -80,8 +93,8 @@ for town in towns:
                 wp = nxt[0]
             if not hits:
                 continue
-            (entry, d_first), (_, d_last) = to_entry(hits[0]), to_entry(hits[-1])
-            if entry is None:
+            (entry, d_first), (last_entry, d_last) = to_entry(hits[0]), to_entry(hits[-1])
+            if entry is None or last_entry is None:
                 continue
             key = (entry.road_id, entry.lane_id)
             _, first, last, end = approaches.get(key, (None, d_first, d_last, hits[-1]))

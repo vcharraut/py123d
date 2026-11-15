@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import IO, Iterator, Optional, Union
 
-from py123d.datatypes import BaseMapObject, StopZoneType
+from py123d.datatypes import BaseMapObject
 from py123d.datatypes.metadata.map_metadata import MapMetadata
 from py123d.parser.base_dataset_parser import BaseMapParser
 from py123d.parser.opendrive.utils.collection import collect_lanes, collect_topology
@@ -14,7 +14,7 @@ from py123d.parser.opendrive.utils.speed_sign_helper import (
     load_speed_signs,
     split_sections_at_speed_signs,
 )
-from py123d.parser.opendrive.utils.stop_zone_helper import iter_stop_zones, load_stop_signs
+from py123d.parser.opendrive.utils.stop_zone_helper import iter_stop_zones, load_stop_signs, unreached_sign_stop_lines
 from py123d.parser.opendrive.utils.static_object_helper import iter_static_objects, load_static_objects
 from py123d.parser.opendrive.utils.surface_helper import iter_road_surfaces, load_junction_pavement
 from py123d.parser.opendrive.xodr_parser.opendrive import load_xodr
@@ -56,12 +56,12 @@ def iter_xodr_map_objects(xodr_file: Union[Path, IO[bytes]]) -> Iterator[BaseMap
         lanes, is_lane, predecessors, successors, openings, sign_speed_limits
     )
     curbs = yield from iter_road_lines(roads, sampled, raised)
-    crosswalk_tree, painted_stop_lines, painted_tree, painted_directions = yield from iter_crosswalks(roads)
+    crosswalk_tree, _, painted_tree, painted_directions = yield from iter_crosswalks(roads)
     stop_lines = collect_stop_lines(roads, junctions, controllers, lanes, all_successors, all_predecessors)
-    # NOTE: On CARLA towns, CARLA's own stop and yield signs replace the OpenDRIVE ones and the painted stop lines.
+    # NOTE: On CARLA towns, CARLA's own stop and yield signs replace the OpenDRIVE ones.
     carla_signs = load_stop_signs(town)
     if carla_signs is not None:
-        stop_lines = {k: v for k, v in stop_lines.items() if v[0] == StopZoneType.TRAFFIC_LIGHT}
+        stop_lines = unreached_sign_stop_lines(stop_lines, lanes, carla_signs)
     signal_zones = yield from iter_stop_zones(
         roads,
         lanes,
@@ -69,7 +69,6 @@ def iter_xodr_map_objects(xodr_file: Union[Path, IO[bytes]]) -> Iterator[BaseMap
         all_successors,
         stop_lines,
         crosswalk_tree,
-        painted_stop_lines if carla_signs is None else [],
         painted_tree,
         painted_directions,
         carla_signs or [],
