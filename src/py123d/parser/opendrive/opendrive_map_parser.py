@@ -16,7 +16,7 @@ from py123d.parser.opendrive.utils.speed_sign_helper import (
 )
 from py123d.parser.opendrive.utils.stop_zone_helper import iter_stop_zones, load_stop_signs
 from py123d.parser.opendrive.utils.static_object_helper import iter_static_objects, load_static_objects
-from py123d.parser.opendrive.utils.surface_helper import iter_road_surfaces
+from py123d.parser.opendrive.utils.surface_helper import iter_road_surfaces, load_junction_pavement
 from py123d.parser.opendrive.xodr_parser.opendrive import load_xodr
 
 
@@ -76,4 +76,4 @@ def iter_xodr_map_objects(xodr_file: Union[Path, IO[bytes]]) -> Iterator[BaseMap
     )
     yield from iter_traffic_lights(roads, controllers, lanes, signal_zones)
     yield from iter_static_objects(load_static_objects(town))
-    yield from iter_road_surfaces(roads, lanes, raised, curb_lanes, curbs, groups)
+    yield from iter_road_surfaces(roads, lanes, raised, curb_lanes, curbs, groups, load_junction_pavement(town) or [])

@@ -1,4 +1,6 @@
-from typing import Any, Callable, Dict, Final, Iterator, List, Set, Type
+import json
+from pathlib import Path
+from typing import Any, Callable, Dict, Final, Iterator, List, Optional, Set, Tuple, Type
 
 import numpy as np
 import numpy.typing as npt
@@ -41,6 +43,23 @@ _MIN_WALKWAY_ON_ROAD: Final[float] = 1.0  # [m^2], walkways overlapping the road
 _ISLAND_KERB_FRACTION: Final[float] = 0.9  # kerb pockets with this much kerb on their boundary are raised islands
 # NOTE: Smaller disconnected road surface pieces are dropped (and thin ones without driving lanes).
 _MIN_SURFACE_AREA: Final[float] = 10.0  # [m^2]
+# NOTE: Exported from CARLA 0.9.16 (scripts/opendrive_parity/export_junction_pavement.py,
+# junction_pavement_to_json.py): the road mesh reached from the lanes of every junction without a kerb, up to 5 m
+# around them, as [height, exterior, hole, ...] with (x, y) rings in the OpenDRIVE frame. CARLA paves a junction as wide
+# as the roads entering it, where the junction roads of the OpenDRIVE file often have no shoulder lane, and paves merge
+# gores.
+_JUNCTION_PAVEMENT_FILE: Final[Path] = Path(__file__).parents[1] / "carla_maps" / "junction_pavement.json"
+_MIN_PAVEMENT_WIDTH: Final[float] = 0.3  # [m], narrower pavement beyond the lanes is within the export's accuracy
+
+
+def load_junction_pavement(town: Optional[str]) -> Optional[List[Tuple[float, shapely.Polygon]]]:
+    """Loads the pavement CARLA has around the junctions of a town map.
+
+    :param town: Town name, i.e. the OpenDRIVE file name without suffixes.
+    :return: (height, pavement polygon) per paved area (see _JUNCTION_PAVEMENT_FILE), None for maps without export.
+    """
+    rows = json.loads(_JUNCTION_PAVEMENT_FILE.read_text()).get(town)
+    return None if rows is None else [(z, shapely.Polygon(rings[0], rings[1:])) for z, *rings in rows]
 
 
 def iter_road_surfaces(
@@ -50,13 +69,14 @@ def iter_road_surfaces(
     curb_lanes: Set[str],
     curbs: List[shapely.LineString],
     groups: Dict[str, List[str]],
+    pavement: List[Tuple[float, shapely.Polygon]],
 ) -> Iterator[BaseMapObject]:
     """Yields walkways, other lane surfaces, road edges, generic drivables and intersections.
 
     The road surface is made of all lanes but sidewalks, raised medians/islands and narrow junction "none" lanes next
     to the reference line (curb strips, checked against CARLA renders). Surfaces above others (bridges) form an upper
     layer. Holes are filled (junction gaps, slivers) unless they are large off-road areas, contain sidewalks or raised
-    lanes, or are curbed islands.
+    lanes, or are curbed islands. CARLA's junction pavement widens the surface where it reaches beyond the lanes.
 
     :param roads: Parsed roads, keyed by id.
     :param lanes: Lanes, keyed by lane id (see collect_lanes).
@@ -64,6 +84,7 @@ def iter_road_surfaces(
     :param curb_lanes: Ids of curb lanes.
     :param curbs: 2D curb lines (see iter_road_lines).
     :param groups: Lane ids per lane group id (see iter_lanes_and_lane_groups).
+    :param pavement: CARLA junction pavement (see load_junction_pavement).
     """
 
     def is_curb_strip(lane: Dict[str, Any]) -> bool:
@@ -160,9 +181,19 @@ def iter_road_surfaces(
         no_driving = not driving_tree.query(piece, predicate="intersects").size
         return no_driving and shapely.maximum_inscribed_circle(piece, 0.05).length < 1.0
 
-    regions, lifts, fillers, dropped = [], [], [], []
-    for layer in ([s for n, s in enumerate(surfaces) if n not in upper], [surfaces[n] for n in upper]):
-        lift = lifter(layer)
+    layers = ([s for n, s in enumerate(surfaces) if n not in upper], [surfaces[n] for n in upper])
+    lifts = [lifter(layer) for layer in layers]
+    # NOTE: A pavement polygon lies on the layer whose nearest lane is at its height.
+    points = np.array([p.representative_point().coords[0] for _, p in pavement]).reshape(-1, 2)
+    heights = np.array([z for z, _ in pavement])
+    height_gaps = np.array(
+        [
+            np.abs(lift(points)[:, 2] - heights) if layer else np.full(len(points), np.inf)
+            for layer, lift in zip(layers, lifts)
+        ]
+    )
+    regions, fillers, dropped = [], [], []
+    for n, (layer, lift) in enumerate(zip(layers, lifts)):
         parts = shapely.get_parts(closed_union(layer))
         # NOTE: Tiny pieces and thin pieces without any driving lane (shoulder rings around islands) are not road.
         small = [p for p in parts if p.area < _MIN_SURFACE_AREA or is_thin(p)]
@@ -202,9 +233,16 @@ def iter_road_surfaces(
             sandwiched = [p for p in shapely.get_parts(closing.intersection(kerb_area)) if p.geom_type == "Polygon"]
             filled += [p for p in sandwiched if shapely.maximum_inscribed_circle(p, 0.01).length > 0.1]
             region = closed_union([union] + filled)
+        # NOTE: Pavement beyond the surface is road, over kerb and sidewalk lanes as well: CARLA has road there.
+        on_layer = (height_gaps[n] < _LAYER_DZ) & (height_gaps[n] == height_gaps.min(axis=0))
+        beyond = shapely.union_all([p for (_, p), use in zip(pavement, on_layer) if use]).difference(region)
+        half = _MIN_PAVEMENT_WIDTH / 2
+        wide = beyond.buffer(-half).buffer(half, join_style="mitre").intersection(beyond)
+        paved = [p for p in shapely.get_parts(wide) if p.geom_type == "Polygon"]
+        region = closed_union([region] + paved) if paved else region
+        filled += paved
         fillers += [shapely.Polygon(lift(shapely.get_coordinates(f.exterior))) for f in filled]
         regions.append(region)
-        lifts.append(lift)
 
     # Other lane types become outline-only surfaces (not raised and not part of a dropped surface piece). Sidewalks
     # and curb strips (the kerb between road edge and sidewalk) are walkways; adjacent ones of a section side merge.
